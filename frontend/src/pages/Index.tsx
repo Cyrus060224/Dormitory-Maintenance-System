@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { RepairRequest, RepairTask, User, Stats, ApiResponse } from '../types';
 import { toast } from 'sonner';

@@ -88,8 +88,20 @@
 
 ## 关键修复说明
 
-- **角色问题**: 注册时选择的角色通过 `role` 字段存入数据库，JWT token 包含 `role`，AuthContext 从 `/api/auth/me` 获取完整用户信息（含 role），Index.tsx 根据 `user.role` 渲染对应视图
-- **报修提交失败**: 后端 `/api/repairs` POST 路由正确解析请求体，使用 `requireRole('student')` 中间件，Zod 验证 omit 掉 studentId/assignedTo/status 字段，从 JWT 中获取 studentId
+- **角色问题（已修复）**: 
+  - 注册 schema 改为独立 `z.object()` 而非 `insertUserSchema.extend()`，确保 `role` 字段被正确验证和写入数据库
+  - JWT token 现在包含 `name` 字段：`{ userId, name, email, role }`
+  - `AuthContext.login()` 改为 `async`，立即从 JWT payload 解码 `role/name` 设置 user 状态，再异步调用 `/api/auth/me` 获取完整信息
+  - `Signup.tsx` 和 `Login.tsx` 使用 `await login(token)` 确保 user 状态设置完成后再 navigate
+- **报修提交失败（已修复）**: 后端 `/api/repairs` POST 路由改用独立 `z.object()` schema 验证请求体，避免 `createInsertSchema` 对 NOT NULL 字段的 required 约束导致验证失败
+
+## 构建配置说明
+
+- `tsconfig.json` - 主编译配置（无 project references），`tsc -b` 直接编译
+- `tsconfig.app.json` - 继承主配置，仅包含 `src`（用于 IDE）
+- `tsconfig.node.json` - 独立配置，用于 `vite.config.ts`（含 node types）
+- `vite.config.ts` - 使用 `fileURLToPath(import.meta.url)` 替代 `__dirname`（ESM 兼容）
+- `package.json` lint 脚本 - 使用 `cd frontend && npm run lint`（使用本地 eslint）
 
 ## 代码生成规范
 

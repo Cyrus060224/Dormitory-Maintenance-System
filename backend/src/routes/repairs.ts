@@ -66,16 +66,24 @@ router.get('/', authenticateJWT, async (req: AuthRequest, res: Response) => {
 router.post('/', authenticateJWT, requireRole('student'), async (req: AuthRequest, res: Response) => {
   try {
     const user = req.user!;
-    const bodySchema = insertRepairRequestSchema.omit({ studentId: true, assignedTo: true, status: true });
-    const validated = bodySchema.parse(req.body);
+    // Use a standalone schema to avoid issues with createInsertSchema NOT NULL fields
+    const createRepairSchema = z.object({
+      dormBuilding: z.string().min(1, '宿舍楼不能为空'),
+      dormRoom: z.string().min(1, '房间号不能为空'),
+      category: z.enum(['water', 'electricity', 'furniture', 'network', 'other']),
+      description: z.string().min(5, '问题描述至少5个字'),
+      priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+      imageUrl: z.string().optional(),
+    });
+    const validated = createRepairSchema.parse(req.body);
     const [request] = await db.insert(repairRequests).values({
       studentId: user.id,
       dormBuilding: validated.dormBuilding,
       dormRoom: validated.dormRoom,
       category: validated.category,
       description: validated.description,
-      imageUrl: validated.imageUrl,
-      priority: validated.priority || 'normal',
+      imageUrl: validated.imageUrl || null,
+      priority: validated.priority,
       status: 'pending',
     } as typeof repairRequests.$inferInsert).returning();
     return res.status(201).json({ success: true, data: request });

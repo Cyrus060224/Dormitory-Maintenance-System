@@ -6,11 +6,22 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean | null;
-  login: (token: string) => void;
+  login: (token: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Decode JWT payload without verification (for reading role/name immediately)
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const base64 = token.split('.')[1];
+    const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -26,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  async function fetchUser(t: string) {
+  async function fetchUser(t: string): Promise<void> {
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${t}` },
@@ -46,10 +57,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function login(newToken: string) {
+  // login: stores token, immediately sets user from JWT payload, then fetches full user from API
+  async function login(newToken: string): Promise<void> {
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    fetchUser(newToken);
+    // Immediately decode JWT to get role/name so UI renders correctly before API call
+    const payload = decodeJwtPayload(newToken);
+    if (payload) {
+      setUser({
+        id: payload.userId as string,
+        name: (payload.name as string) || '',
+        email: payload.email as string,
+        role: payload.role as 'student' | 'technician' | 'admin',
+      });
+      setIsAuthenticated(true);
+    }
+    // Then fetch full user info from API to get all fields (name, dormRoom, etc.)
+    await fetchUser(newToken);
   }
 
   function logout() {

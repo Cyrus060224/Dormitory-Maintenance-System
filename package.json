@@ -8,7 +8,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build && cd ../backend && npm run build",
     "start": "cd backend && npm run start",
-    "lint": "cd frontend && npx eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "cd frontend && npm run lint --",
     "typecheck": "cd frontend && npm run typecheck",
     "typecheck:build": "cd frontend && npm run typecheck:build"
   },

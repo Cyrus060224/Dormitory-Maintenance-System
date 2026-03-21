@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
@@ -35,7 +35,7 @@ export default function Login() {
       });
       const data = await res.json() as { success: boolean; data: { token: string }; message?: string };
       if (data.success && data.data.token) {
-        login(data.data.token);
+        await login(data.data.token);
         toast.success('登录成功');
         navigate('/', { replace: true });
       } else {
