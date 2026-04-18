@@ -34,12 +34,12 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json() as { success: boolean; data: { token: string }; message?: string };
-      if (data.success && data.data.token) {
-        await login(data.data.token);
+      if (data.success && data.data?.token) {
+        login(data.data.token);
         toast.success('登录成功');
         navigate('/', { replace: true });
       } else {
-        setError(data.message || '登录失败');
+        setError(data.message || '邮箱或密码错误');
       }
     } catch {
       setError('网络错误，请稍后重试');

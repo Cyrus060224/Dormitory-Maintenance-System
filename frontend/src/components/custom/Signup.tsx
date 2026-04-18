@@ -64,13 +64,13 @@ export default function Signup() {
           phone: form.phone || undefined,
         }),
       });
-      const data = await res.json() as { success: boolean; data: { token: string }; message?: string };
-      if (data.success && data.data.token) {
-        await login(data.data.token);
+      const data = await res.json() as { success: boolean; data: { token: string; user?: { role: string } }; message?: string };
+      if (data.success && data.data?.token) {
+        login(data.data.token);
         toast.success('注册成功，欢迎加入！');
         navigate('/', { replace: true });
       } else {
-        setError(data.message || '注册失败');
+        setError(data.message || '注册失败，请检查填写信息');
       }
     } catch {
       setError('网络错误，请稍后重试');

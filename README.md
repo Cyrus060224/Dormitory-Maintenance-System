@@ -88,13 +88,15 @@
 
 ## 关键修复说明
 
-- **角色问题（已修复 v2）**: 
-  - 注册 schema 使用独立 `z.object()` 确保 `role` 字段被正确验证
+- **角色问题（已修复 v3 - 最终方案）**: 
+  - `AuthContext` 完全重构：`login()` 改为**同步函数**，完全信任 JWT payload，不再调用 `/api/auth/me`
+  - 初始加载也改为纯 JWT 解码，不发起任何 API 请求，彻底消除竞态条件
   - JWT token 包含 `name` 字段：`{ userId, name, email, role }`
-  - `AuthContext.login()` 重构：先从 JWT payload 解码设置 user 状态（权威来源），再异步调用 `/api/auth/me` 补充完整信息
-  - **关键修复**：`login()` 中 `/api/auth/me` 的结果不再覆盖 JWT 中的 role，而是 merge（`role: data.data.role || jwtUser.role`）
-  - `/api/auth/me` 失败时不清除已登录状态，只在初始加载时清除
-  - 后端 signup 路由添加详细日志，确保 role 正确写入数据库
+  - 后端 signup/login 路由确保 role 正确写入 JWT
+- **注册失败（已修复 v3）**: 
+  - 根本原因：旧版 `login()` 是 async，内部调用 `/api/auth/me` 失败时会清除 token 导致注册失败
+  - 修复：`login()` 改为同步，直接从 JWT 解码用户信息，无任何 API 调用
+  - `Signup.tsx` 和 `Login.tsx` 中的 `await login()` 改为同步调用 `login()`
 - **报修提交失败（已修复 v2）**: 
   - 移除 `requireRole('student')` 中间件，改为路由内部手动检查 `user.role !== 'student'`
   - 添加详细日志便于调试
