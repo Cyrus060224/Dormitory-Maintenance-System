@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "builds": [{
+      "src": "backend/server.ts",
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 60,
+        "includeFiles": ["backend/**/*.ts"]
+      }
+    },
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist",
+        "installCommand": "npm install --legacy-peer-deps",
+        "buildCommand": "npm run build"
+      }
+    }
+  ],
+  "rewrites": [{
+      "source": "/api/(.*)",
+      "destination": "/backend/server.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
+    }
+  ]
+}

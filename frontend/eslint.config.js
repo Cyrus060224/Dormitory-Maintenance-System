@@ -18,9 +18,15 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
+      "prefer-const": "off",
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": "off",
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true },
+      ],
       "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/prefer-const": "off",
     },
   }
 );

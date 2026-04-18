@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db } from '../db';
-import { reviews, repairRequests, insertReviewSchema } from '../db/schema';
+import { reviews, repairRequests } from '../db/schema';
 import { authenticateJWT, requireRole, AuthRequest } from '../middleware/auth';
 import { eq, and } from 'drizzle-orm';
 
@@ -10,12 +10,16 @@ const router = Router();
 // POST /api/reviews - submit review
 router.post('/', authenticateJWT, requireRole('student'), async (req: AuthRequest, res: Response) => {
   try {
-    const user = req.user!;
-    const schema = insertReviewSchema.omit({ studentId: true });
+    const user = req.authUser!;
+    const schema = z.object({
+      requestId: z.string().uuid(),
+      rating: z.number().int().min(1).max(5),
+      comment: z.string().optional(),
+    });
     const validated = schema.parse(req.body);
     // Check request belongs to student and is completed
     const [request] = await db.select().from(repairRequests)
-      .where(and(eq(repairRequests.id, validated.requestId as string), eq(repairRequests.studentId, user.id)))
+      .where(and(eq(repairRequests.id, validated.requestId), eq(repairRequests.studentId, user.id)))
       .limit(1);
     if (!request) return res.status(404).json({ success: false, message: '报修单不存在' });
     if (request.status !== 'completed') {
@@ -23,17 +27,17 @@ router.post('/', authenticateJWT, requireRole('student'), async (req: AuthReques
     }
     // Check not already reviewed
     const existing = await db.select().from(reviews)
-      .where(and(eq(reviews.requestId, validated.requestId as string), eq(reviews.studentId, user.id)))
+      .where(and(eq(reviews.requestId, validated.requestId), eq(reviews.studentId, user.id)))
       .limit(1);
     if (existing.length > 0) {
       return res.status(400).json({ success: false, message: '已经评价过该报修单' });
     }
     const [review] = await db.insert(reviews).values({
-      requestId: validated.requestId as string,
+      requestId: validated.requestId,
       studentId: user.id,
-      rating: validated.rating as number,
-      comment: validated.comment,
-    } as typeof reviews.$inferInsert).returning();
+      rating: validated.rating,
+      comment: validated.comment || null,
+    } as InsertReview).returning();
     return res.status(201).json({ success: true, data: review });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -54,5 +58,7 @@ router.get('/', authenticateJWT, requireRole('admin'), async (req: AuthRequest, 
     return res.status(500).json({ success: false, message: '获取评价失败' });
   }
 });
+
+type InsertReview = typeof reviews.$inferInsert;
 
 export default router;

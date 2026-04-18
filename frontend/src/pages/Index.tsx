@@ -98,9 +98,12 @@ function StudentView({ token }: { token: string | null }) {
         setView('list');
         loadRequests();
       } else {
-        toast.error(data.message || '提交失败');
+        toast.error(data.message || `提交失败 (HTTP ${res.status})`);
       }
-    } catch { toast.error('网络错误，请稍后重试'); }
+    } catch (err) { 
+      console.error('Submit repair error:', err);
+      toast.error('网络错误，请稍后重试'); 
+    }
     finally { setSubmitting(false); }
   }
 

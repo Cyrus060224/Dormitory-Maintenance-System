@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../db';
-import { users, insertUserSchema } from '../db/schema';
+import { users } from '../db/schema';
 import { eq } from 'drizzle-orm';
 
 const router = Router();
@@ -32,21 +32,25 @@ const loginSchema = z.object({
 router.post('/signup', async (req: Request, res: Response) => {
   try {
     const validated = signupSchema.parse(req.body);
-    // Check if email already exists
+    const roleToInsert = validated.role || 'student';
+    console.log('[Signup] Registering user with role:', roleToInsert, 'email:', validated.email);
     const existing = await db.select().from(users).where(eq(users.email, validated.email)).limit(1);
     if (existing.length > 0) {
       return res.status(400).json({ success: false, message: '该邮箱已被注册' });
     }
     const hashedPassword = await bcrypt.hash(validated.password, 12);
-    const [user] = await db.insert(users).values({
+    const insertData = {
       name: validated.name,
       email: validated.email,
       password: hashedPassword,
-      role: validated.role,  // role is validated by Zod enum, never undefined
+      role: roleToInsert,
       studentId: validated.studentId || null,
       dormRoom: validated.dormRoom || null,
       phone: validated.phone || null,
-    } as typeof users.$inferInsert).returning();
+    };
+    console.log('[Signup] Inserting user data:', { ...insertData, password: '[HIDDEN]' });
+    const [user] = await db.insert(users).values(insertData as typeof users.$inferInsert).returning();
+    console.log('[Signup] User created with role:', user.role, 'id:', user.id);
     const token = jwt.sign(
       { userId: user.id, name: user.name, email: user.email, role: user.role },
       JWT_SECRET,
@@ -61,9 +65,10 @@ router.post('/signup', async (req: Request, res: Response) => {
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
+      console.error('[Signup] Zod validation error:', err.errors);
       return res.status(400).json({ success: false, message: err.errors[0].message });
     }
-    console.error('Signup error:', err);
+    console.error('[Signup] Error:', err);
     return res.status(500).json({ success: false, message: '注册失败，请稍后重试' });
   }
 });
@@ -109,14 +114,17 @@ router.get('/me', async (req: Request, res: Response) => {
   }
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string; role: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; name: string; email: string; role: string };
     const [user] = await db.select().from(users).where(eq(users.id, decoded.userId)).limit(1);
     if (!user) return res.status(404).json({ success: false, message: '用户不存在' });
+    console.log('[/me] User from DB - id:', user.id, 'role:', user.role, 'JWT role:', decoded.role);
+    const effectiveRole = user.role || decoded.role;
     return res.json({
       success: true,
-      data: { id: user.id, name: user.name, email: user.email, role: user.role, studentId: user.studentId, dormRoom: user.dormRoom, phone: user.phone },
+      data: { id: user.id, name: user.name, email: user.email, role: effectiveRole, studentId: user.studentId, dormRoom: user.dormRoom, phone: user.phone },
     });
-  } catch {
+  } catch (err) {
+    console.error('[/me] Token verification error:', err);
     return res.status(401).json({ success: false, message: 'Token 无效' });
   }
 });

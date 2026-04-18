@@ -1,5 +1,4 @@
-import { pgTable, text, timestamp, integer, uuid, boolean } from 'drizzle-orm/pg-core';
-import { createInsertSchema } from 'drizzle-zod';
+import { pgTable, text, timestamp, integer, uuid } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 // Users table
@@ -16,11 +15,14 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-export const insertUserSchema = createInsertSchema(users, {
+export const insertUserSchema = z.object({
   name: z.string().min(1, '姓名不能为空'),
   email: z.string().email('邮箱格式不正确'),
   password: z.string().min(6, '密码至少6位'),
   role: z.enum(['student', 'technician', 'admin']).default('student'),
+  studentId: z.string().optional().nullable(),
+  dormRoom: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
 });
 
 export type User = typeof users.$inferSelect;
@@ -43,12 +45,17 @@ export const repairRequests = pgTable('repair_requests', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-export const insertRepairRequestSchema = createInsertSchema(repairRequests, {
+export const insertRepairRequestSchema = z.object({
+  studentId: z.string().uuid(),
   dormBuilding: z.string().min(1, '宿舍楼不能为空'),
   dormRoom: z.string().min(1, '房间号不能为空'),
   category: z.enum(['water', 'electricity', 'furniture', 'network', 'other']),
   description: z.string().min(5, '问题描述至少5个字'),
+  imageUrl: z.string().optional().nullable(),
+  status: z.enum(['pending', 'approved', 'in_progress', 'completed', 'rejected']).default('pending'),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+  assignedTo: z.string().uuid().optional().nullable(),
+  adminNote: z.string().optional().nullable(),
 });
 
 export type RepairRequest = typeof repairRequests.$inferSelect;
@@ -67,8 +74,13 @@ export const repairTasks = pgTable('repair_tasks', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
-export const insertRepairTaskSchema = createInsertSchema(repairTasks, {
+export const insertRepairTaskSchema = z.object({
+  requestId: z.string().uuid(),
+  technicianId: z.string().uuid(),
   status: z.enum(['assigned', 'in_progress', 'completed']).default('assigned'),
+  workNote: z.string().optional().nullable(),
+  startedAt: z.date().optional().nullable(),
+  completedAt: z.date().optional().nullable(),
 });
 
 export type RepairTask = typeof repairTasks.$inferSelect;
@@ -84,8 +96,11 @@ export const reviews = pgTable('reviews', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const insertReviewSchema = createInsertSchema(reviews, {
+export const insertReviewSchema = z.object({
+  requestId: z.string().uuid(),
+  studentId: z.string().uuid(),
   rating: z.number().int().min(1).max(5),
+  comment: z.string().optional().nullable(),
 });
 
 export type Review = typeof reviews.$inferSelect;

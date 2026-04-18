@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { db } from '../db';
 import { users } from '../db/schema';
 import { authenticateJWT, requireRole, AuthRequest } from '../middleware/auth';
-import { eq, ne } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -45,7 +45,7 @@ router.get('/technicians', authenticateJWT, requireRole('admin'), async (req: Au
 // DELETE /api/users/:id - admin delete user
 router.delete('/:id', authenticateJWT, requireRole('admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const result = await db.delete(users).where(eq(users.id, id)).returning();
     if (result.length === 0) return res.status(404).json({ success: false, message: '用户不存在' });
     return res.json({ success: true, data: null });

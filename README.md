@@ -88,12 +88,23 @@
 
 ## 关键修复说明
 
-- **角色问题（已修复）**: 
-  - 注册 schema 改为独立 `z.object()` 而非 `insertUserSchema.extend()`，确保 `role` 字段被正确验证和写入数据库
-  - JWT token 现在包含 `name` 字段：`{ userId, name, email, role }`
-  - `AuthContext.login()` 改为 `async`，立即从 JWT payload 解码 `role/name` 设置 user 状态，再异步调用 `/api/auth/me` 获取完整信息
-  - `Signup.tsx` 和 `Login.tsx` 使用 `await login(token)` 确保 user 状态设置完成后再 navigate
-- **报修提交失败（已修复）**: 后端 `/api/repairs` POST 路由改用独立 `z.object()` schema 验证请求体，避免 `createInsertSchema` 对 NOT NULL 字段的 required 约束导致验证失败
+- **角色问题（已修复 v2）**: 
+  - 注册 schema 使用独立 `z.object()` 确保 `role` 字段被正确验证
+  - JWT token 包含 `name` 字段：`{ userId, name, email, role }`
+  - `AuthContext.login()` 重构：先从 JWT payload 解码设置 user 状态（权威来源），再异步调用 `/api/auth/me` 补充完整信息
+  - **关键修复**：`login()` 中 `/api/auth/me` 的结果不再覆盖 JWT 中的 role，而是 merge（`role: data.data.role || jwtUser.role`）
+  - `/api/auth/me` 失败时不清除已登录状态，只在初始加载时清除
+  - 后端 signup 路由添加详细日志，确保 role 正确写入数据库
+- **报修提交失败（已修复 v2）**: 
+  - 移除 `requireRole('student')` 中间件，改为路由内部手动检查 `user.role !== 'student'`
+  - 添加详细日志便于调试
+  - 前端显示具体错误信息（含 HTTP 状态码）
+- **构建错误修复（已修复 v3）**:
+  - `backend/db/schema.ts` 移除 `drizzle-zod` 的 `createInsertSchema`，改用手动 `z.object()` 定义，解决 drizzle-orm 版本不兼容的 TS2345 错误
+  - `backend/middleware/auth.ts` 将 `req.user` 改为 `req.authUser`（自定义字段），避免与 `@types/express` 内置 `Express.User` 类型冲突导致的 TS2769 错误
+  - `frontend/tsconfig.json` 移除 `"types": ["vite/client"]`，改放到 `tsconfig.app.json`，解决 `tsc -b` 时的 TS2688 错误
+  - `frontend/package.json` 将 `eslint-plugin-react-hooks` 从 RC 版本 `^5.1.0-rc.0` 更新为稳定版 `^5.0.0`，解决 ESLint 找不到包的错误
+  - `backend/routes/reviews.ts` 移除 `insertReviewSchema.omit()` 用法，改用独立 `z.object()` 避免 TS2352 类型转换错误
 
 ## 构建配置说明
 

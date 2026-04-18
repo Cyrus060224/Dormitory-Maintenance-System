@@ -10,7 +10,7 @@ const router = Router();
 // GET /api/tasks - get tasks for technician
 router.get('/', authenticateJWT, requireRole('technician', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const user = req.user!;
+    const user = req.authUser!;
     const whereClause = user.role === 'technician' ? eq(repairTasks.technicianId, user.id) : undefined;
     const results = await db.select({
       id: repairTasks.id,
@@ -45,7 +45,7 @@ router.get('/', authenticateJWT, requireRole('technician', 'admin'), async (req:
 // PATCH /api/tasks/:id - update task status
 router.patch('/:id', authenticateJWT, requireRole('technician', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const schema = z.object({
       status: z.enum(['assigned', 'in_progress', 'completed']),
       workNote: z.string().optional(),
@@ -66,7 +66,7 @@ router.patch('/:id', authenticateJWT, requireRole('technician', 'admin'), async 
       }
     }
     const [updated] = await db.update(repairTasks)
-      .set(updateData as typeof repairTasks.$inferInsert)
+      .set(updateData as InsertRepairTask)
       .where(eq(repairTasks.id, id))
       .returning();
     if (!updated) return res.status(404).json({ success: false, message: '任务不存在' });
@@ -79,5 +79,7 @@ router.patch('/:id', authenticateJWT, requireRole('technician', 'admin'), async 
     return res.status(500).json({ success: false, message: '更新任务失败' });
   }
 });
+
+type InsertRepairTask = typeof repairTasks.$inferInsert;
 
 export default router;
