@@ -3,9 +3,9 @@ import time
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -40,6 +40,17 @@ def create_access_token(user_id: str, name: str, email: str, role: str) -> str:
         "exp": expire,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(authorization: str = Header(...)) -> dict:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token expired or invalid")
 
 # ─── Database ───────────────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(__file__), "dorm.db")
@@ -123,6 +134,21 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CreateRepairRequest(BaseModel):
+    dormBuilding: str
+    dormRoom: str
+    category: str
+    description: str
+    priority: str = "normal"
+    imageUrl: Optional[str] = None
+
+
+class UpdateRepairStatus(BaseModel):
+    status: Optional[str] = None
+    assignedTo: Optional[str] = None
+    adminNote: Optional[str] = None
+
+
 # ─── Auth Endpoints ─────────────────────────────────────────────────────────────
 @app.post("/api/register")
 async def register(payload: SignupRequest):
@@ -169,24 +195,149 @@ async def login(payload: LoginRequest):
 
 # ─── Repair Endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/repairs")
-async def get_repairs():
+async def get_repairs(current_user: dict = Depends(verify_token)):
     conn = get_db()
-    rows = conn.execute("SELECT * FROM repairs ORDER BY createdAt DESC").fetchall()
+    role = current_user.get("role", "student")
+    user_id = current_user.get("userId", "")
+
+    if role == "admin":
+        rows = conn.execute("""
+            SELECT r.*, 
+                   u.name as studentName,
+                   t.name as assignedToName
+            FROM repairs r
+            LEFT JOIN users u ON r.studentId = u.id
+            LEFT JOIN users t ON r.assignedTo = t.id
+            ORDER BY r.createdAt DESC
+        """).fetchall()
+    elif role == "technician":
+        rows = conn.execute("""
+            SELECT r.*, 
+                   u.name as studentName,
+                   t.name as assignedToName
+            FROM repairs r
+            LEFT JOIN users u ON r.studentId = u.id
+            LEFT JOIN users t ON r.assignedTo = t.id
+            WHERE r.assignedTo = ?
+            ORDER BY r.createdAt DESC
+        """, (user_id,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT r.*, 
+                   u.name as studentName,
+                   t.name as assignedToName
+            FROM repairs r
+            LEFT JOIN users u ON r.studentId = u.id
+            LEFT JOIN users t ON r.assignedTo = t.id
+            WHERE r.studentId = ?
+            ORDER BY r.createdAt DESC
+        """, (user_id,)).fetchall()
     conn.close()
     data = [dict(r) for r in rows]
     return {"success": True, "data": data}
 
 
 @app.post("/api/repairs")
-async def create_repair():
+async def create_repair(payload: CreateRepairRequest, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    role = current_user.get("role", "student")
+
+    if role != "student":
+        raise HTTPException(status_code=403, detail="Only students can create repair requests")
+
+    if not payload.dormBuilding or not payload.dormRoom or not payload.description:
+        raise HTTPException(status_code=400, detail="请填写所有必填项")
+
+    if len(payload.description.strip()) < 5:
+        raise HTTPException(status_code=400, detail="问题描述至少需要5个字")
+
     repair_id = str(uuid.uuid4())
     now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-    return {"success": True, "data": {"id": repair_id, "status": "pending", "createdAt": now, "updatedAt": now}}
+
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO repairs 
+           (id, studentId, dormBuilding, dormRoom, category, description, imageUrl, status, priority, assignedTo, adminNote, createdAt, updatedAt) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (repair_id, user_id, payload.dormBuilding, payload.dormRoom, payload.category,
+         payload.description, payload.imageUrl, "pending", payload.priority, None, None, now, now),
+    )
+    conn.commit()
+
+    row = conn.execute("""
+        SELECT r.*, 
+               u.name as studentName,
+               t.name as assignedToName
+        FROM repairs r
+        LEFT JOIN users u ON r.studentId = u.id
+        LEFT JOIN users t ON r.assignedTo = t.id
+        WHERE r.id = ?
+    """, (repair_id,)).fetchone()
+    conn.close()
+
+    print(f"[/api/repairs] Repair created: {repair_id} by {current_user.get('name')}")
+    return {"success": True, "data": dict(row)}
 
 
 @app.patch("/api/repairs/{repair_id}/status")
-async def update_repair_status(repair_id: str):
-    return {"success": True, "data": {"id": repair_id}}
+async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, current_user: dict = Depends(verify_token)):
+    role = current_user.get("role", "student")
+    user_id = current_user.get("userId", "")
+
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM repairs WHERE id = ?", (repair_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="报修记录不存在")
+
+    if role == "student":
+        conn.close()
+        raise HTTPException(status_code=403, detail="学生无法更新报修状态")
+
+    if role == "technician":
+        if existing["assignedTo"] != user_id:
+            conn.close()
+            raise HTTPException(status_code=403, detail="只能更新自己分配到的任务")
+        if payload.status not in ("in_progress", "completed"):
+            conn.close()
+            raise HTTPException(status_code=400, detail="维修人员只能将状态更新为维修中或已完成")
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    updates = []
+    values = []
+
+    if payload.status is not None:
+        updates.append("status = ?")
+        values.append(payload.status)
+
+    if role == "admin":
+        if payload.assignedTo is not None:
+            updates.append("assignedTo = ?")
+            values.append(payload.assignedTo if payload.assignedTo else None)
+        if payload.adminNote is not None:
+            updates.append("adminNote = ?")
+            values.append(payload.adminNote)
+
+    updates.append("updatedAt = ?")
+    values.append(now)
+    values.append(repair_id)
+
+    conn.execute(f"UPDATE repairs SET {', '.join(updates)} WHERE id = ?", values)
+    conn.commit()
+
+    row = conn.execute("""
+        SELECT r.*, 
+               u.name as studentName,
+               t.name as assignedToName
+        FROM repairs r
+        LEFT JOIN users u ON r.studentId = u.id
+        LEFT JOIN users t ON r.assignedTo = t.id
+        WHERE r.id = ?
+    """, (repair_id,)).fetchone()
+    conn.close()
+
+    print(f"[/api/repairs/{repair_id}] Status updated by {current_user.get('name')}")
+    return {"success": True, "data": dict(row)}
 
 
 # ─── Task Endpoints ─────────────────────────────────────────────────────────────
@@ -202,19 +353,43 @@ async def update_task(task_id: str):
 
 # ─── Stats Endpoint (real data from database) ───────────────────────────────────
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(current_user: dict = Depends(verify_token)):
+    role = current_user.get("role", "student")
+    user_id = current_user.get("userId", "")
+
     conn = get_db()
-    total = conn.execute("SELECT COUNT(*) FROM repairs").fetchone()[0]
-    pending = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'pending'").fetchone()[0]
-    in_progress = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'in_progress'").fetchone()[0]
-    completed = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'completed'").fetchone()[0]
-    rejected = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'rejected'").fetchone()[0]
+
+    if role == "admin":
+        total = conn.execute("SELECT COUNT(*) FROM repairs").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'pending'").fetchone()[0]
+        in_progress = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'in_progress'").fetchone()[0]
+        completed = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'completed'").fetchone()[0]
+        rejected = conn.execute("SELECT COUNT(*) FROM repairs WHERE status = 'rejected'").fetchone()[0]
+        category_rows = conn.execute("SELECT category, COUNT(*) as count FROM repairs GROUP BY category").fetchall()
+    elif role == "technician":
+        total = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ?", (user_id,)).fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status = 'pending'", (user_id,)).fetchone()[0]
+        in_progress = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status = 'in_progress'", (user_id,)).fetchone()[0]
+        completed = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status = 'completed'", (user_id,)).fetchone()[0]
+        rejected = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status = 'rejected'", (user_id,)).fetchone()[0]
+        category_rows = conn.execute("SELECT category, COUNT(*) as count FROM repairs WHERE assignedTo = ? GROUP BY category", (user_id,)).fetchall()
+    else:
+        total = conn.execute("SELECT COUNT(*) FROM repairs WHERE studentId = ?", (user_id,)).fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM repairs WHERE studentId = ? AND status = 'pending'", (user_id,)).fetchone()[0]
+        in_progress = conn.execute("SELECT COUNT(*) FROM repairs WHERE studentId = ? AND status = 'in_progress'", (user_id,)).fetchone()[0]
+        completed = conn.execute("SELECT COUNT(*) FROM repairs WHERE studentId = ? AND status = 'completed'", (user_id,)).fetchone()[0]
+        rejected = conn.execute("SELECT COUNT(*) FROM repairs WHERE studentId = ? AND status = 'rejected'", (user_id,)).fetchone()[0]
+        category_rows = conn.execute("SELECT category, COUNT(*) as count FROM repairs WHERE studentId = ? GROUP BY category", (user_id,)).fetchall()
+
     total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     student_count = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'student'").fetchone()[0]
     technician_count = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'technician'").fetchone()[0]
     reviews = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
     avg_rating_row = conn.execute("SELECT AVG(rating) FROM reviews").fetchone()[0]
     conn.close()
+
+    category_stats = [{"category": r["category"], "count": r["count"]} for r in category_rows]
+
     return {
         "success": True,
         "data": {
@@ -226,7 +401,7 @@ async def get_stats():
             "totalUsers": total_users,
             "studentCount": student_count,
             "technicianCount": technician_count,
-            "categoryStats": [],
+            "categoryStats": category_stats,
             "avgRating": f"{avg_rating_row or 0:.1f}",
             "reviewCount": reviews,
         },

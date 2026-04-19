@@ -67,6 +67,7 @@ export interface Stats {
   technicianCount: number;
   categoryStats: { category: string; count: number }[];
   avgRating: string;
+  reviewCount: number;
 }
 
 export interface ApiResponse<T> {

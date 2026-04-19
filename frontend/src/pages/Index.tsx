@@ -8,7 +8,7 @@ import {
   ChevronRight, RefreshCw, Send, Eye
 } from 'lucide-react';
 
-const API = '';
+const API = 'http://127.0.0.1:8000';
 
 function authHeaders(token: string | null) {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
@@ -16,14 +16,14 @@ function authHeaders(token: string | null) {
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待审核', approved: '已审核', in_progress: '维修中',
+  pending: '待处理', approved: '已审核', in_progress: '进行中',
   completed: '已完成', rejected: '已拒绝',
-  assigned: '已分配', // task status
+  assigned: '已分配',
 };
 const STATUS_COLOR: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
+  pending: 'bg-orange-100 text-orange-800',
   approved: 'bg-blue-100 text-blue-800',
-  in_progress: 'bg-purple-100 text-purple-800',
+  in_progress: 'bg-blue-100 text-blue-800',
   completed: 'bg-green-100 text-green-800',
   rejected: 'bg-red-100 text-red-800',
   assigned: 'bg-blue-100 text-blue-800',
@@ -330,17 +330,17 @@ function StudentView({ token }: { token: string | null }) {
 
 // ─── Technician View ──────────────────────────────────────────────────────────
 function TechnicianView({ token }: { token: string | null }) {
-  const [tasks, setTasks] = useState<RepairTask[]>([]);
+  const [tasks, setTasks] = useState<RepairRequest[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<RepairTask | null>(null);
+  const [selected, setSelected] = useState<RepairRequest | null>(null);
   const [workNote, setWorkNote] = useState('');
   const [updating, setUpdating] = useState(false);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/tasks`, { headers: authHeaders(token) });
-      const data = await res.json() as ApiResponse<RepairTask[]>;
+      const res = await fetch(`${API}/api/repairs`, { headers: authHeaders(token) });
+      const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
     } catch { toast.error('加载失败'); }
     finally { setLoading(false); }
@@ -351,12 +351,12 @@ function TechnicianView({ token }: { token: string | null }) {
   async function updateTask(taskId: string, status: string) {
     setUpdating(true);
     try {
-      const res = await fetch(`${API}/api/tasks/${taskId}`, {
+      const res = await fetch(`${API}/api/repairs/${taskId}/status`, {
         method: 'PATCH',
         headers: authHeaders(token),
-        body: JSON.stringify({ status, workNote: workNote || undefined }),
+        body: JSON.stringify({ status, adminNote: workNote || undefined }),
       });
-      const data = await res.json() as ApiResponse<RepairTask>;
+      const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
         toast.success('任务状态已更新');
         setSelected(null);
@@ -369,7 +369,7 @@ function TechnicianView({ token }: { token: string | null }) {
     finally { setUpdating(false); }
   }
 
-  const pending = tasks.filter(t => t.status === 'assigned');
+  const pending = tasks.filter(t => t.status === 'pending' || t.status === 'approved');
   const inProgress = tasks.filter(t => t.status === 'in_progress');
   const completed = tasks.filter(t => t.status === 'completed');
 
@@ -422,12 +422,12 @@ function TechnicianView({ token }: { token: string | null }) {
                 </div>
                 <Badge label={STATUS_LABEL[t.status]} colorClass={STATUS_COLOR[t.status]} />
               </div>
-              {t.workNote && (
+              {t.adminNote && (
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground">维修记录：{t.workNote}</p>
+                  <p className="text-xs text-muted-foreground">管理员备注：{t.adminNote}</p>
                 </div>
               )}
-              {t.status !== 'completed' && (
+              {t.status !== 'completed' && t.status !== 'rejected' && (
                 <div className="mt-3 pt-3 border-t border-border">
                   {selected?.id === t.id ? (
                     <div className="space-y-3">
@@ -437,7 +437,7 @@ function TechnicianView({ token }: { token: string | null }) {
                       <div className="flex gap-2">
                         <button onClick={() => { setSelected(null); setWorkNote(''); }}
                           className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
-                        {t.status === 'assigned' && (
+                        {(t.status === 'pending' || t.status === 'approved') && (
                           <button onClick={() => updateTask(t.id, 'in_progress')} disabled={updating}
                             className="flex-1 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
                             {updating ? '...' : '开始维修'}
