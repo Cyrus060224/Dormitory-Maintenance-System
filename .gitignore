@@ -1,0 +1,10 @@
+# 前端依赖
+frontend/node_modules/
+frontend/dist/
+
+# Python 环境与缓存
+backend_fastapi/__pycache__/
+backend_fastapi/venv/
+backend_fastapi/*.db
+.DS_Store
+node_modules

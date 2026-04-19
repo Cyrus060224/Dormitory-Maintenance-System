@@ -50,7 +50,7 @@ export default function Signup() {
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/signup', {
+      const res = await fetch('http://127.0.0.1:8000/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -64,11 +64,10 @@ export default function Signup() {
           phone: form.phone || undefined,
         }),
       });
-      const data = await res.json() as { success: boolean; data: { token: string; user?: { role: string } }; message?: string };
-      if (data.success && data.data?.token) {
-        login(data.data.token);
+      const data = await res.json() as { status: string; message: string };
+      if (data.status === 'success') {
         toast.success('注册成功，欢迎加入！');
-        navigate('/', { replace: true });
+        navigate('/login', { replace: true });
       } else {
         setError(data.message || '注册失败，请检查填写信息');
       }

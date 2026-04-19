@@ -28,18 +28,19 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('http://127.0.0.1:8000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json() as { success: boolean; data: { token: string }; message?: string };
-      if (data.success && data.data?.token) {
-        login(data.data.token);
+      const data = await res.json() as { status: string; token: string; user?: { name: string; email: string; role: string }; message?: string };
+      if (data.status === 'success' && data.token) {
+        login(data.token);
+        localStorage.setItem('userName', data.user?.name || '');
         toast.success('登录成功');
-        navigate('/', { replace: true });
+        navigate('/dashboard', { replace: true });
       } else {
-        setError(data.message || '邮箱或密码错误');
+        setError('邮箱或密码错误');
       }
     } catch {
       setError('网络错误，请稍后重试');
