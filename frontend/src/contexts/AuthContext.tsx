@@ -14,8 +14,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Decode JWT payload without verification (for reading role/name immediately)
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
-    const base64 = token.split('.')[1];
-    const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64 = parts[1];
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const json = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
