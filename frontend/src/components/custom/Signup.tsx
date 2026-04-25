@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Wrench } from 'lucide-react';
+import { API } from '../../lib/api';
 
 type Role = 'student' | 'technician' | 'admin';
 
@@ -50,7 +51,7 @@ export default function Signup() {
     }
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/register', {
+      const res = await fetch(API.AUTH.SIGNUP, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

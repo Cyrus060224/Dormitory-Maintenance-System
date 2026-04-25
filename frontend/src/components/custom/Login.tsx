@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Wrench } from 'lucide-react';
+import { API } from '../../lib/api';
 
 export default function Login() {
   const { login, isAuthenticated } = useAuth();
@@ -28,7 +29,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/login', {
+      const res = await fetch(API.AUTH.LOGIN, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -40,7 +41,7 @@ export default function Login() {
         toast.success('登录成功');
         navigate('/dashboard', { replace: true });
       } else {
-        setError('邮箱或密码错误');
+        setError(data.message || '邮箱或密码错误');
       }
     } catch {
       setError('网络错误，请稍后重试');

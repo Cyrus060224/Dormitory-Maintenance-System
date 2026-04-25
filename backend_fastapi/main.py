@@ -434,7 +434,43 @@ async def delete_user(user_id: str):
     return {"success": True, "data": None}
 
 
-# ─── Review Endpoints ───────────────────────────────────────────────────────────
+@app.get("/api/users/me")
+async def get_current_user(current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    user = conn.execute(
+        "SELECT id, name, email, role, studentId, dormRoom, phone, createdAt FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    conn.close()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return {"success": True, "data": dict(user)}
+
+
+class CreateReviewRequest(BaseModel):
+    requestId: str
+    rating: int
+    comment: Optional[str] = None
+
+
 @app.post("/api/reviews")
-async def create_review():
-    return {"success": True, "data": None}
+async def create_review(payload: CreateReviewRequest, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+
+    if payload.rating < 1 or payload.rating > 5:
+        raise HTTPException(status_code=400, detail="评分必须在1-5之间")
+
+    review_id = str(uuid.uuid4())
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO reviews (id, requestId, studentId, rating, comment, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+        (review_id, payload.requestId, user_id, payload.rating, payload.comment, now),
+    )
+    conn.commit()
+    conn.close()
+
+    print(f"[/api/reviews] Review created: {review_id} by {current_user.get('name')}")
+    return {"success": True, "data": {"id": review_id}}

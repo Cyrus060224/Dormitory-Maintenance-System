@@ -7,12 +7,7 @@ import {
   Plus, Star, CheckCircle, Clock,
   ChevronRight, RefreshCw, Send, Eye
 } from 'lucide-react';
-
-const API = 'http://127.0.0.1:8000';
-
-function authHeaders(token: string | null) {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
+import { API, getAuthHeaders } from '../lib/api';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
@@ -63,7 +58,7 @@ function StudentView({ token }: { token: string | null }) {
   const loadRequests = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/repairs`, { headers: authHeaders(token) });
+      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setRequests(data.data);
     } catch { toast.error('加载失败'); }
@@ -79,9 +74,9 @@ function StudentView({ token }: { token: string | null }) {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/repairs`, {
+      const res = await fetch(API.REPAIRS.CREATE, {
         method: 'POST',
-        headers: authHeaders(token),
+        headers: getAuthHeaders(token),
         body: JSON.stringify({
           dormBuilding: form.dormBuilding,
           dormRoom: form.dormRoom,
@@ -110,9 +105,9 @@ function StudentView({ token }: { token: string | null }) {
   async function submitReview(requestId: string) {
     setReviewSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/reviews`, {
+      const res = await fetch(API.REVIEWS.CREATE, {
         method: 'POST',
-        headers: authHeaders(token),
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ requestId, rating: reviewForm.rating, comment: reviewForm.comment }),
       });
       const data = await res.json() as ApiResponse<unknown>;
@@ -339,7 +334,7 @@ function TechnicianView({ token }: { token: string | null }) {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/repairs`, { headers: authHeaders(token) });
+      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
     } catch { toast.error('加载失败'); }
@@ -351,9 +346,9 @@ function TechnicianView({ token }: { token: string | null }) {
   async function updateTask(taskId: string, status: string) {
     setUpdating(true);
     try {
-      const res = await fetch(`${API}/api/repairs/${taskId}/status`, {
+      const res = await fetch(API.REPAIRS.UPDATE_STATUS(taskId), {
         method: 'PATCH',
-        headers: authHeaders(token),
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ status, adminNote: workNote || undefined }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
@@ -481,7 +476,7 @@ function AdminView({ token }: { token: string | null }) {
   const loadRepairs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/repairs`, { headers: authHeaders(token) });
+      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setRepairs(data.data);
     } catch { toast.error('加载失败'); }
@@ -491,8 +486,8 @@ function AdminView({ token }: { token: string | null }) {
   const loadUsers = useCallback(async () => {
     try {
       const [uRes, tRes] = await Promise.all([
-        fetch(`${API}/api/users`, { headers: authHeaders(token) }),
-        fetch(`${API}/api/users/technicians`, { headers: authHeaders(token) }),
+        fetch(API.USERS.LIST, { headers: getAuthHeaders(token) }),
+        fetch(API.USERS.TECHNICIANS, { headers: getAuthHeaders(token) }),
       ]);
       const uData = await uRes.json() as ApiResponse<User[]>;
       const tData = await tRes.json() as ApiResponse<User[]>;
@@ -503,7 +498,7 @@ function AdminView({ token }: { token: string | null }) {
 
   const loadStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/stats`, { headers: authHeaders(token) });
+      const res = await fetch(API.STATS.GET, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<Stats>;
       if (data.success) setStats(data.data);
     } catch { toast.error('加载统计失败'); }
@@ -520,9 +515,9 @@ function AdminView({ token }: { token: string | null }) {
     if (!selected) return;
     setAssigning(true);
     try {
-      const res = await fetch(`${API}/api/repairs/${selected.id}/status`, {
+      const res = await fetch(API.REPAIRS.UPDATE_STATUS(selected.id), {
         method: 'PATCH',
-        headers: authHeaders(token),
+        headers: getAuthHeaders(token),
         body: JSON.stringify({
           status: assignForm.status,
           assignedTo: assignForm.assignedTo || undefined,
@@ -546,9 +541,9 @@ function AdminView({ token }: { token: string | null }) {
   async function deleteUser(userId: string) {
     if (!confirm('确定要删除该用户吗？')) return;
     try {
-      const res = await fetch(`${API}/api/users/${userId}`, {
+      const res = await fetch(API.USERS.UPDATE(userId), {
         method: 'DELETE',
-        headers: authHeaders(token),
+        headers: getAuthHeaders(token),
       });
       const data = await res.json() as ApiResponse<null>;
       if (data.success) { toast.success('用户已删除'); loadUsers(); }
