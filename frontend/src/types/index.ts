@@ -17,7 +17,7 @@ export interface RepairRequest {
   category: 'water' | 'electricity' | 'furniture' | 'network' | 'other';
   description: string;
   imageUrl?: string;
-  status: 'pending' | 'approved' | 'in_progress' | 'completed' | 'rejected';
+  status: 'pending' | 'approved' | 'in_progress' | 'completed' | 'pending_evaluation' | 'closed' | 'rejected';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedTo?: string;
   adminNote?: string;
@@ -25,6 +25,10 @@ export interface RepairRequest {
   updatedAt: string;
   studentName?: string;
   assignedToName?: string;
+  // 评价字段
+  rating?: number;
+  feedbackTags?: string;
+  feedbackText?: string;
 }
 
 export interface RepairTask {

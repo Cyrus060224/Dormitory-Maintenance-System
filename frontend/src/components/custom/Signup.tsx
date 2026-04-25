@@ -26,7 +26,7 @@ export default function Signup() {
 
   useEffect(() => {
     if (isAuthenticated === true) {
-      navigate('/', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 

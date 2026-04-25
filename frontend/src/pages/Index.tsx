@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { RepairRequest, RepairTask, User, Stats, ApiResponse } from '../types';
+import { RepairRequest, User, Stats, ApiResponse } from '../types';
 import { toast } from 'sonner';
 import {
   Wrench, Home, ClipboardList, BarChart2, Users, LogOut,
@@ -8,20 +8,21 @@ import {
   ChevronRight, RefreshCw, Send, Eye
 } from 'lucide-react';
 import { API, getAuthHeaders } from '../lib/api';
+import EvaluationModal from '../components/custom/EvaluationModal';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
-  pending: '待处理', approved: '已审核', in_progress: '进行中',
-  completed: '已完成', rejected: '已拒绝',
-  assigned: '已分配',
+  pending: '待处理', approved: '已审核', in_progress: '维修中',
+  completed: '已完成', pending_evaluation: '待评价', closed: '已结案', rejected: '已拒绝',
 };
 const STATUS_COLOR: Record<string, string> = {
   pending: 'bg-orange-100 text-orange-800',
   approved: 'bg-blue-100 text-blue-800',
-  in_progress: 'bg-blue-100 text-blue-800',
+  in_progress: 'bg-purple-100 text-purple-800',
   completed: 'bg-green-100 text-green-800',
+  pending_evaluation: 'bg-yellow-100 text-yellow-800 ring-2 ring-yellow-300',
+  closed: 'bg-gray-100 text-gray-800',
   rejected: 'bg-red-100 text-red-800',
-  assigned: 'bg-blue-100 text-blue-800',
 };
 const CATEGORY_LABEL: Record<string, string> = {
   water: '水管/水电', electricity: '电路/电器', furniture: '家具/设施',
@@ -48,8 +49,9 @@ function StudentView({ token }: { token: string | null }) {
   const [selected, setSelected] = useState<RepairRequest | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [evalModalOpen, setEvalModalOpen] = useState(false);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalTarget, setEvalTarget] = useState<RepairRequest | null>(null);
   const [form, setForm] = useState({
     dormBuilding: '', dormRoom: '', category: 'water',
     description: '', priority: 'normal', imageUrl: '',
@@ -102,25 +104,31 @@ function StudentView({ token }: { token: string | null }) {
     finally { setSubmitting(false); }
   }
 
-  async function submitReview(requestId: string) {
-    setReviewSubmitting(true);
+  /** 提交评价（通过新接口） */
+  async function handleEvaluate(rating: number, tags: string[], text: string) {
+    if (!evalTarget) return;
+    setEvalLoading(true);
     try {
-      const res = await fetch(API.REVIEWS.CREATE, {
+      const res = await fetch(API.REPAIRS.EVALUATE(evalTarget.id), {
         method: 'POST',
         headers: getAuthHeaders(token),
-        body: JSON.stringify({ requestId, rating: reviewForm.rating, comment: reviewForm.comment }),
+        body: JSON.stringify({
+          rating,
+          feedbackTags: tags.join(','),
+          feedbackText: text || undefined,
+        }),
       });
-      const data = await res.json() as ApiResponse<unknown>;
+      const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
-        toast.success('评价提交成功！');
-        setReviewForm({ rating: 5, comment: '' });
+        toast.success('评价提交成功！感谢您的反馈');
+        setEvalModalOpen(false);
+        setEvalTarget(null);
         loadRequests();
-        setView('list');
       } else {
         toast.error(data.message || '评价提交失败');
       }
     } catch { toast.error('网络错误'); }
-    finally { setReviewSubmitting(false); }
+    finally { setEvalLoading(false); }
   }
 
   if (view === 'new') {
@@ -242,25 +250,25 @@ function StudentView({ token }: { token: string | null }) {
             提交时间：{new Date(selected.createdAt).toLocaleString('zh-CN')}
           </div>
 
-          {/* Review section */}
-          {selected.status === 'completed' && (
+          {/* 评价信息显示 */}
+          {selected.rating && selected.rating > 0 && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-semibold text-foreground mb-3">服务评价</p>
-              <div className="flex gap-1 mb-3">
+              <p className="text-sm font-semibold text-foreground mb-2">服务评价</p>
+              <div className="flex items-center gap-1 mb-2">
                 {[1,2,3,4,5].map((s) => (
-                  <button key={s} onClick={() => setReviewForm(p => ({ ...p, rating: s }))}
-                    className={`w-8 h-8 transition ${s <= reviewForm.rating ? 'text-yellow-400' : 'text-gray-300'}`}>
-                    <Star className="w-full h-full fill-current" />
-                  </button>
+                  <Star key={s} className={`w-5 h-5 ${s <= selected.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
                 ))}
               </div>
-              <textarea value={reviewForm.comment} onChange={(e) => setReviewForm(p => ({ ...p, comment: e.target.value }))}
-                rows={3} placeholder="请填写您的评价（可选）"
-                className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition resize-none mb-3" />
-              <button onClick={() => submitReview(selected.id)} disabled={reviewSubmitting}
-                className="w-full py-2.5 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition disabled:opacity-50">
-                {reviewSubmitting ? '提交中...' : '提交评价'}
-              </button>
+              {selected.feedbackTags && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selected.feedbackTags.split(',').map((tag) => (
+                    <span key={tag} className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">{tag}</span>
+                  ))}
+                </div>
+              )}
+              {selected.feedbackText && (
+                <p className="text-sm text-muted-foreground bg-muted rounded-lg px-3 py-2">{selected.feedbackText}</p>
+              )}
             </div>
           )}
         </div>
@@ -299,26 +307,51 @@ function StudentView({ token }: { token: string | null }) {
       ) : (
         <div className="space-y-3">
           {requests.map((r) => (
-            <div key={r.id} className="bg-white rounded-2xl shadow-sm border border-border p-4 hover:shadow-md transition cursor-pointer"
-              onClick={() => { setSelected(r); setView('detail'); }}>
+            <div key={r.id} className="bg-white rounded-2xl shadow-sm border border-border p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 cursor-pointer"
+                  onClick={() => { setSelected(r); setView('detail'); }}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-foreground">{r.dormBuilding} {r.dormRoom}</span>
                     <Badge label={CATEGORY_LABEL[r.category]} colorClass="bg-gray-100 text-gray-700" />
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{r.description}</p>
                   <p className="text-xs text-muted-foreground mt-2">{new Date(r.createdAt).toLocaleDateString('zh-CN')}</p>
+                  {/* 已评价工单显示星级 */}
+                  {r.rating && r.rating > 0 && (
+                    <div className="flex items-center gap-1 mt-1">
+                      {[1,2,3,4,5].map((s) => (
+                        <Star key={s} className={`w-3 h-3 ${s <= r.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
+                <div className="flex flex-col items-end gap-2 shrink-0">
                   <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
                   <Badge label={PRIORITY_LABEL[r.priority]} colorClass={PRIORITY_COLOR[r.priority]} />
+                  {/* 待评价状态显示高亮按钮 */}
+                  {r.status === 'pending_evaluation' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEvalTarget(r); setEvalModalOpen(true); }}
+                      className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-bold hover:bg-yellow-600 transition animate-pulse shadow-lg shadow-yellow-200"
+                    >
+                      去评价
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* 评价弹窗 */}
+      <EvaluationModal
+        open={evalModalOpen}
+        onClose={() => { setEvalModalOpen(false); setEvalTarget(null); }}
+        onSubmit={handleEvaluate}
+        loading={evalLoading}
+      />
     </div>
   );
 }
@@ -366,7 +399,7 @@ function TechnicianView({ token }: { token: string | null }) {
 
   const pending = tasks.filter(t => t.status === 'pending' || t.status === 'approved');
   const inProgress = tasks.filter(t => t.status === 'in_progress');
-  const completed = tasks.filter(t => t.status === 'completed');
+  const completed = tasks.filter(t => t.status === 'completed' || t.status === 'pending_evaluation' || t.status === 'closed');
 
   return (
     <div>
@@ -422,7 +455,28 @@ function TechnicianView({ token }: { token: string | null }) {
                   <p className="text-xs text-muted-foreground">管理员备注：{t.adminNote}</p>
                 </div>
               )}
-              {t.status !== 'completed' && t.status !== 'rejected' && (
+              {/* 评价信息显示（只读） */}
+              {t.rating && t.rating > 0 && (
+                <div className="mt-3 pt-3 border-t border-border bg-yellow-50/50 -mx-4 px-4 pb-1 rounded-b-2xl">
+                  <p className="text-xs font-medium text-foreground mb-1">⭐ 学生评价</p>
+                  <div className="flex items-center gap-1 mb-1">
+                    {[1,2,3,4,5].map((s) => (
+                      <Star key={s} className={`w-4 h-4 ${s <= t.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
+                    ))}
+                  </div>
+                  {t.feedbackTags && (
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {t.feedbackTags.split(',').map((tag) => (
+                        <span key={tag} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                  {t.feedbackText && (
+                    <p className="text-xs text-muted-foreground">"{t.feedbackText}"</p>
+                  )}
+                </div>
+              )}
+              {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' && (
                 <div className="mt-3 pt-3 border-t border-border">
                   {selected?.id === t.id ? (
                     <div className="space-y-3">
@@ -579,7 +633,7 @@ function AdminView({ token }: { token: string | null }) {
           </div>
           {/* Filter */}
           <div className="flex gap-2 flex-wrap mb-4">
-            {['all', 'pending', 'approved', 'in_progress', 'completed', 'rejected'].map((s) => (
+            {['all', 'pending', 'approved', 'in_progress', 'completed', 'pending_evaluation', 'closed', 'rejected'].map((s) => (
               <button key={s} onClick={() => setFilterStatus(s)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   filterStatus === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -613,6 +667,17 @@ function AdminView({ token }: { token: string | null }) {
                       {r.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{r.studentName}</p>}
                       {r.assignedToName && <p className="text-xs text-muted-foreground">维修员：{r.assignedToName}</p>}
                       <p className="text-xs text-muted-foreground mt-1">{new Date(r.createdAt).toLocaleString('zh-CN')}</p>
+                      {/* 评价信息显示 */}
+                      {r.rating && r.rating > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <div className="flex items-center gap-0.5">
+                            {[1,2,3,4,5].map((s) => (
+                              <Star key={s} className={`w-3 h-3 ${s <= r.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
+                            ))}
+                          </div>
+                          <span className="text-xs text-yellow-600 font-medium">{r.rating}/5</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
@@ -634,7 +699,8 @@ function AdminView({ token }: { token: string | null }) {
                             <option value="pending">待审核</option>
                             <option value="approved">已审核</option>
                             <option value="in_progress">维修中</option>
-                            <option value="completed">已完成</option>
+                            <option value="completed">已完成（待评价）</option>
+                            <option value="closed">已结案</option>
                             <option value="rejected">已拒绝</option>
                           </select>
                         </div>

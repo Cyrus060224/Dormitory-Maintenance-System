@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Index from './pages/Index';
 import Login from './components/custom/Login';
 import Signup from './components/custom/Signup';
+import LandingPage from './pages/LandingPage';
 
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
@@ -18,18 +19,27 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
-      />
-      <Route
-        path="/signup"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <Signup />}
-      />
+      {/* 落地页 - 默认路由（未登录用户可见） */}
       <Route
         path="/"
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LandingPage />}
+      />
+      {/* 登录页 */}
+      <Route
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
+      />
+      {/* 注册页 */}
+      <Route
+        path="/signup"
+        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Signup />}
+      />
+      {/* 控制台（已登录用户专属） */}
+      <Route
+        path="/dashboard"
         element={isAuthenticated ? <Index /> : <Navigate to="/login" replace />}
       />
+      {/* 兼容旧路径 */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

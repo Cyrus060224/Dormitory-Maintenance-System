@@ -13,6 +13,7 @@ export const API = {
     LIST: `${API_BASE_URL}/api/repairs`,
     CREATE: `${API_BASE_URL}/api/repairs`,
     UPDATE_STATUS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/status`,
+    EVALUATE: (id: string) => `${API_BASE_URL}/api/repairs/${id}/evaluate`,
   },
   REVIEWS: {
     CREATE: `${API_BASE_URL}/api/reviews`,

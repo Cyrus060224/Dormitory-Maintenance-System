@@ -63,6 +63,7 @@ def get_db() -> sqlite3.Connection:
 
 
 def init_db():
+    """初始化数据库表结构"""
     conn = get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -90,6 +91,9 @@ def init_db():
             priority TEXT NOT NULL DEFAULT 'normal',
             assignedTo TEXT,
             adminNote TEXT,
+            rating INTEGER,
+            feedbackTags TEXT,
+            feedbackText TEXT,
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
         )
@@ -104,8 +108,42 @@ def init_db():
             createdAt TEXT NOT NULL
         )
     """)
+
+    # 数据库迁移：为已有数据库添加新字段
+    migration_add_columns(conn)
+
     conn.commit()
     conn.close()
+
+
+def migration_add_columns(conn: sqlite3.Connection):
+    """为已有数据库添加评价相关字段（SQLite 不支持直接 ADD COLUMN IF NOT EXISTS）"""
+    try:
+        # 检查 rating 字段是否存在
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(repairs)").fetchall()]
+        if 'rating' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN rating INTEGER")
+        if 'feedbackTags' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN feedbackTags TEXT")
+        if 'feedbackText' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN feedbackText TEXT")
+    except Exception as e:
+        print(f"[Migration] Error: {e}")
+
+
+# ─── 状态机定义 ───────────────────────────────────────────────────────────
+# 状态流转: pending -> approved -> in_progress -> completed -> pending_evaluation -> closed
+# 也可能: pending -> rejected
+VALID_STATUSES = {'pending', 'approved', 'in_progress', 'completed', 'pending_evaluation', 'closed', 'rejected'}
+STATUS_LABELS = {
+    'pending': '待处理',
+    'approved': '已审核',
+    'in_progress': '维修中',
+    'completed': '已完成',
+    'pending_evaluation': '待评价',
+    'closed': '已结案',
+    'rejected': '已拒绝',
+}
 
 
 @app.on_event("startup")
@@ -301,6 +339,9 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
         if payload.status not in ("in_progress", "completed"):
             conn.close()
             raise HTTPException(status_code=400, detail="维修人员只能将状态更新为维修中或已完成")
+        # 维修员提交完成时，状态自动变为 pending_evaluation（待学生评价）
+        if payload.status == "completed":
+            payload.status = "pending_evaluation"
 
     now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
     updates = []
@@ -452,6 +493,74 @@ class CreateReviewRequest(BaseModel):
     requestId: str
     rating: int
     comment: Optional[str] = None
+
+
+class EvaluateRequest(BaseModel):
+    """学生评价请求模型"""
+    rating: int
+    feedbackTags: Optional[str] = None  # 逗号分隔的标签字符串
+    feedbackText: Optional[str] = None
+
+
+@app.post("/api/repairs/{repair_id}/evaluate")
+async def evaluate_repair(repair_id: str, payload: EvaluateRequest, current_user: dict = Depends(verify_token)):
+    """学生评价工单接口 - 将工单状态从 pending_evaluation 更新为 closed"""
+    user_id = current_user.get("userId", "")
+    role = current_user.get("role", "student")
+
+    if role != "student":
+        raise HTTPException(status_code=403, detail="只有学生可以评价")
+
+    if payload.rating < 1 or payload.rating > 5:
+        raise HTTPException(status_code=400, detail="评分必须在1-5之间")
+
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM repairs WHERE id = ?", (repair_id,)).fetchone()
+
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="报修记录不存在")
+
+    if existing["studentId"] != user_id:
+        conn.close()
+        raise HTTPException(status_code=403, detail="只能评价自己的报修")
+
+    if existing["status"] != "pending_evaluation":
+        conn.close()
+        raise HTTPException(status_code=400, detail="该工单当前不可评价")
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+    # 更新评价信息并将状态改为 closed
+    conn.execute(
+        """UPDATE repairs 
+           SET rating = ?, feedbackTags = ?, feedbackText = ?, status = 'closed', updatedAt = ?
+           WHERE id = ?""",
+        (payload.rating, payload.feedbackTags, payload.feedbackText, now, repair_id),
+    )
+    conn.commit()
+
+    # 同时在 reviews 表中插入记录（保持向后兼容）
+    review_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO reviews (id, requestId, studentId, rating, comment, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+        (review_id, repair_id, user_id, payload.rating, payload.feedbackText, now),
+    )
+    conn.commit()
+
+    row = conn.execute("""
+        SELECT r.*, 
+               u.name as studentName,
+               t.name as assignedToName
+        FROM repairs r
+        LEFT JOIN users u ON r.studentId = u.id
+        LEFT JOIN users t ON r.assignedTo = t.id
+        WHERE r.id = ?
+    """, (repair_id,)).fetchone()
+    conn.close()
+
+    print(f"[/api/repairs/{repair_id}/evaluate] Evaluation submitted: {payload.rating} stars by {current_user.get('name')}")
+    return {"success": True, "data": dict(row)}
 
 
 @app.post("/api/reviews")
