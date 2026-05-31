@@ -28,6 +28,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 function userFromToken(token: string): User | null {
   const payload = decodeJwtPayload(token);
   if (!payload) return null;
+  if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) return null;
   return {
     id: payload.userId as string,
     name: (payload.name as string) || '',

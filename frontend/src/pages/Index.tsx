@@ -7,7 +7,7 @@ import {
   Plus, Star, CheckCircle, Clock,
   ChevronRight, RefreshCw, Send, Eye
 } from 'lucide-react';
-import { API, getAuthHeaders } from '../lib/api';
+import { API, getAuthHeaders, readApiMessage } from '../lib/api';
 import EvaluationModal from '../components/custom/EvaluationModal';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
@@ -63,7 +63,8 @@ function StudentView({ token }: { token: string | null }) {
       const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setRequests(data.data);
-    } catch { toast.error('加载失败'); }
+      else toast.error(data.message || '加载失败');
+    } catch { toast.error('加载失败，请确认后端服务已启动'); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -95,7 +96,7 @@ function StudentView({ token }: { token: string | null }) {
         setView('list');
         loadRequests();
       } else {
-        toast.error(data.message || `提交失败 (HTTP ${res.status})`);
+        toast.error(data.message || await readApiMessage(res, `提交失败 (HTTP ${res.status})`));
       }
     } catch (err) { 
       console.error('Submit repair error:', err);
@@ -125,7 +126,7 @@ function StudentView({ token }: { token: string | null }) {
         setEvalTarget(null);
         loadRequests();
       } else {
-        toast.error(data.message || '评价提交失败');
+        toast.error(data.message || await readApiMessage(res, '评价提交失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setEvalLoading(false); }
@@ -370,7 +371,8 @@ function TechnicianView({ token }: { token: string | null }) {
       const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
-    } catch { toast.error('加载失败'); }
+      else toast.error(data.message || '加载失败');
+    } catch { toast.error('加载失败，请确认后端服务已启动'); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -382,7 +384,7 @@ function TechnicianView({ token }: { token: string | null }) {
       const res = await fetch(API.REPAIRS.UPDATE_STATUS(taskId), {
         method: 'PATCH',
         headers: getAuthHeaders(token),
-        body: JSON.stringify({ status, adminNote: workNote || undefined }),
+        body: JSON.stringify({ status, workNote: workNote || undefined }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
@@ -391,7 +393,7 @@ function TechnicianView({ token }: { token: string | null }) {
         setWorkNote('');
         loadTasks();
       } else {
-        toast.error(data.message || '更新失败');
+        toast.error(data.message || await readApiMessage(res, '更新失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setUpdating(false); }
@@ -453,6 +455,11 @@ function TechnicianView({ token }: { token: string | null }) {
               {t.adminNote && (
                 <div className="mt-3 pt-3 border-t border-border">
                   <p className="text-xs text-muted-foreground">管理员备注：{t.adminNote}</p>
+                </div>
+              )}
+              {t.workNote && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground">维修记录：{t.workNote}</p>
                 </div>
               )}
               {/* 评价信息显示（只读） */}
@@ -533,7 +540,8 @@ function AdminView({ token }: { token: string | null }) {
       const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setRepairs(data.data);
-    } catch { toast.error('加载失败'); }
+      else toast.error(data.message || '加载失败');
+    } catch { toast.error('加载失败，请确认后端服务已启动'); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -546,8 +554,10 @@ function AdminView({ token }: { token: string | null }) {
       const uData = await uRes.json() as ApiResponse<User[]>;
       const tData = await tRes.json() as ApiResponse<User[]>;
       if (uData.success) setUsers(uData.data);
+      else toast.error(uData.message || '加载用户失败');
       if (tData.success) setTechnicians(tData.data);
-    } catch { toast.error('加载用户失败'); }
+      else toast.error(tData.message || '加载维修人员失败');
+    } catch { toast.error('加载用户失败，请检查管理员权限'); }
   }, [token]);
 
   const loadStats = useCallback(async () => {
@@ -555,7 +565,8 @@ function AdminView({ token }: { token: string | null }) {
       const res = await fetch(API.STATS.GET, { headers: getAuthHeaders(token) });
       const data = await res.json() as ApiResponse<Stats>;
       if (data.success) setStats(data.data);
-    } catch { toast.error('加载统计失败'); }
+      else toast.error(data.message || '加载统计失败');
+    } catch { toast.error('加载统计失败，请检查管理员权限'); }
   }, [token]);
 
   useEffect(() => {
@@ -586,7 +597,7 @@ function AdminView({ token }: { token: string | null }) {
         loadRepairs();
         loadStats();
       } else {
-        toast.error(data.message || '操作失败');
+        toast.error(data.message || await readApiMessage(res, '操作失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setAssigning(false); }
@@ -601,7 +612,7 @@ function AdminView({ token }: { token: string | null }) {
       });
       const data = await res.json() as ApiResponse<null>;
       if (data.success) { toast.success('用户已删除'); loadUsers(); }
-      else toast.error(data.message || '删除失败');
+      else toast.error(data.message || await readApiMessage(res, '删除失败'));
     } catch { toast.error('网络错误'); }
   }
 

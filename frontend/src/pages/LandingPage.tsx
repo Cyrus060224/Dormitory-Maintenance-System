@@ -14,7 +14,7 @@ export default function LandingPage() {
           <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
             <Wrench className="w-4 h-4 text-white" />
           </div>
-          <span className="text-lg font-bold text-foreground hidden sm:block">智能宿舍保修平台</span>
+          <span className="text-lg font-bold text-foreground hidden sm:block">智能宿舍报修平台</span>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -171,7 +171,7 @@ export default function LandingPage() {
             立即登录
             <ArrowRight className="w-5 h-5" />
           </Link>
-          <p className="text-xs text-muted-foreground mt-8">© 2025 智能宿舍保修平台 · 校园后勤管理系统</p>
+          <p className="text-xs text-muted-foreground mt-8">© 2026 智能宿舍报修平台 · 校园后勤管理系统</p>
         </div>
       </section>
     </div>

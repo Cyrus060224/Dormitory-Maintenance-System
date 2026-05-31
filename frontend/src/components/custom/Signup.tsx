@@ -65,12 +65,12 @@ export default function Signup() {
           phone: form.phone || undefined,
         }),
       });
-      const data = await res.json() as { status: string; message: string };
+      const data = await res.json() as { status?: string; success?: boolean; message?: string; detail?: string };
       if (data.status === 'success') {
         toast.success('注册成功，欢迎加入！');
         navigate('/login', { replace: true });
       } else {
-        setError(data.message || '注册失败，请检查填写信息');
+        setError(data.message || data.detail || '注册失败，请检查填写信息');
       }
     } catch {
       setError('网络错误，请稍后重试');

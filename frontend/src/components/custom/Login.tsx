@@ -34,14 +34,14 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json() as { status: string; token: string; user?: { name: string; email: string; role: string }; message?: string };
+      const data = await res.json() as { status?: string; success?: boolean; token?: string; user?: { name: string; email: string; role: string }; message?: string; detail?: string };
       if (data.status === 'success' && data.token) {
         login(data.token);
         localStorage.setItem('userName', data.user?.name || '');
         toast.success('登录成功');
         navigate('/dashboard', { replace: true });
       } else {
-        setError(data.message || '邮箱或密码错误');
+        setError(data.message || data.detail || '邮箱或密码错误');
       }
     } catch {
       setError('网络错误，请稍后重试');

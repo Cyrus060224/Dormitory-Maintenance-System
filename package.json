@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev": "npm run dev:fastapi",
     "dev:fastapi": "concurrently \"npm run dev:backend-fastapi\" \"npm run dev:frontend\"",
+    "dev:express": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "start": "cross-env NODE_ENV=production npm run start:backend",
     "start:backend": "cd backend && npm run start",
     "build": "npm run build:frontend && npm run build:backend",
@@ -15,7 +16,7 @@
     "lint": "cd frontend && npm run lint --",
     "db:push": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 npx drizzle-kit push",
     "dev:backend": "cd backend && npm run dev",
-    "dev:backend-fastapi": "cd backend_fastapi && python3 -m uvicorn main:app --reload --port 8000",
+    "dev:backend-fastapi": "cd backend_fastapi && python -m uvicorn main:app --reload --port 8000",
     "dev:frontend": "cd frontend && npm run dev",
     "clean": "rimraf frontend/dist backend/dist",
     "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install"
