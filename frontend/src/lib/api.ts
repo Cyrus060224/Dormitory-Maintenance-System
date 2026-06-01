@@ -70,3 +70,12 @@ export async function authFetch(url: string, token: string | null, options?: Req
   }
   return res;
 }
+
+export async function readApiMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = await response.json() as { message?: string; detail?: string };
+    return data.message || data.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
