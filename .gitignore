@@ -1,8 +1,10 @@
 # 前端
 frontend/node_modules/
 frontend/dist/
+frontend/*.tsbuildinfo
 
 # Python 环境与缓存
+.venv/
 backend_fastapi/__pycache__/
 backend_fastapi/venv/
 backend_fastapi/.venv/
@@ -43,3 +45,6 @@ yarn-error.log*
 # 临时文件
 *.tmp
 *.temp
+
+# 启动脚本日志
+logs/

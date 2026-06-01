@@ -44,9 +44,9 @@ export async function apiRequest(url: string, options?: RequestInit): Promise<Re
   return response;
 }
 
-export function getAuthHeaders(token: string): HeadersInit {
+export function getAuthHeaders(token: string | null): HeadersInit {
   return {
-    Authorization: `Bearer ${token}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     'Content-Type': 'application/json',
   };
 }

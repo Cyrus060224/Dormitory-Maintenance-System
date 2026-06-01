@@ -104,7 +104,7 @@ function StudentView({ token }: { token: string | null }) {
         setView('list');
         loadRequests();
       } else {
-        toast.error(data.message || `提交失败 (HTTP ${res.status})`);
+        toast.error(data.message || await readApiMessage(res, `提交失败 (HTTP ${res.status})`));
       }
     } catch (err) { 
       console.error('Submit repair error:', err);
@@ -133,7 +133,7 @@ function StudentView({ token }: { token: string | null }) {
         setEvalTarget(null);
         loadRequests();
       } else {
-        toast.error(data.message || '评价提交失败');
+        toast.error(data.message || await readApiMessage(res, '评价提交失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setEvalLoading(false); }
@@ -384,7 +384,8 @@ function TechnicianView({ token }: { token: string | null }) {
       const res = await authFetch(API.REPAIRS.LIST, token);
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
-    } catch { toast.error('加载失败'); }
+      else toast.error(data.message || '加载失败');
+    } catch { toast.error('加载失败，请确认后端服务已启动'); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -404,7 +405,7 @@ function TechnicianView({ token }: { token: string | null }) {
         setWorkNote('');
         loadTasks();
       } else {
-        toast.error(data.message || '更新失败');
+        toast.error(data.message || await readApiMessage(res, '更新失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setUpdating(false); }
@@ -466,6 +467,11 @@ function TechnicianView({ token }: { token: string | null }) {
               {t.adminNote && (
                 <div className="mt-3 pt-3 border-t border-border">
                   <p className="text-xs text-muted-foreground">管理员备注：{t.adminNote}</p>
+                </div>
+              )}
+              {t.workNote && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground">维修记录：{t.workNote}</p>
                 </div>
               )}
               {/* 评价信息显示（只读） */}
@@ -586,7 +592,8 @@ function AdminView({ token }: { token: string | null }) {
       const res = await authFetch(API.STATS.GET, token);
       const data = await res.json() as ApiResponse<Stats>;
       if (data.success) setStats(data.data);
-    } catch { toast.error('加载统计失败'); }
+      else toast.error(data.message || '加载统计失败');
+    } catch { toast.error('加载统计失败，请检查管理员权限'); }
   }, [token]);
 
   useEffect(() => {
@@ -616,7 +623,7 @@ function AdminView({ token }: { token: string | null }) {
         loadRepairs();
         loadStats();
       } else {
-        toast.error(data.message || '操作失败');
+        toast.error(data.message || await readApiMessage(res, '操作失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setAssigning(false); }
@@ -630,7 +637,7 @@ function AdminView({ token }: { token: string | null }) {
       });
       const data = await res.json() as ApiResponse<null>;
       if (data.success) { toast.success('用户已删除'); loadUsers(); }
-      else toast.error(data.message || '删除失败');
+      else toast.error(data.message || await readApiMessage(res, '删除失败'));
     } catch { toast.error('网络错误'); }
   }
 

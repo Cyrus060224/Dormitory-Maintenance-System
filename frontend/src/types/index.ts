@@ -21,6 +21,7 @@ export interface RepairRequest {
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedTo?: string;
   adminNote?: string;
+  workNote?: string;
   createdAt: string;
   updatedAt: string;
   studentName?: string;

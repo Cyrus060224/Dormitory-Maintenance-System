@@ -5,12 +5,18 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
 app = FastAPI(title="Dorm Repair API")
+
+def parse_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
 
 # Configure CORS
 app.add_middleware(
@@ -21,13 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException):
+    message = exc.detail if isinstance(exc.detail, str) else "请求处理失败"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"success": False, "message": message, "data": None},
+    )
+
 # ─── Password hashing ───────────────────────────────────────────────────────────
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 # ─── JWT settings ───────────────────────────────────────────────────────────────
-SECRET_KEY = "dorm-repair-system-secret-key-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET", "dorm-repair-system-secret-key-change-in-production")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_MINUTES = 1440
+TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "1440"))
 
 def create_access_token(user_id: str, name: str, email: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_EXPIRE_MINUTES)
@@ -42,18 +57,24 @@ def create_access_token(user_id: str, name: str, email: str, role: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def verify_token(authorization: str = Header(...)) -> dict:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
+def verify_token(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="请先登录")
     token = authorization.split(" ", 1)[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError:
-        raise HTTPException(status_code=401, detail="Token expired or invalid")
+        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+
+
+def require_admin(current_user: dict = Depends(verify_token)) -> dict:
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current_user
 
 # ─── Database ───────────────────────────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(__file__), "dorm.db")
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "dorm.db"))
 
 
 def get_db() -> sqlite3.Connection:
@@ -91,6 +112,7 @@ def init_db():
             priority TEXT NOT NULL DEFAULT 'normal',
             assignedTo TEXT,
             adminNote TEXT,
+            workNote TEXT,
             rating INTEGER,
             feedbackTags TEXT,
             feedbackText TEXT,
@@ -127,6 +149,8 @@ def migration_add_columns(conn: sqlite3.Connection):
             conn.execute("ALTER TABLE repairs ADD COLUMN feedbackTags TEXT")
         if 'feedbackText' not in columns:
             conn.execute("ALTER TABLE repairs ADD COLUMN feedbackText TEXT")
+        if 'workNote' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN workNote TEXT")
     except Exception as e:
         print(f"[Migration] Error: {e}")
 
@@ -185,6 +209,7 @@ class UpdateRepairStatus(BaseModel):
     status: Optional[str] = None
     assignedTo: Optional[str] = None
     adminNote: Optional[str] = None
+    workNote: Optional[str] = None
 
 
 # ─── Auth Endpoints ─────────────────────────────────────────────────────────────
@@ -219,8 +244,10 @@ async def register(payload: SignupRequest):
     finally:
         conn.close()
     print(f"[/api/register] User registered: {payload.name} ({payload.email})")
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=201, content={"status": "success", "message": "Registration successful"})
+    return JSONResponse(
+        status_code=201,
+        content={"status": "success", "success": True, "message": "注册成功", "data": None},
+    )
 
 
 @app.post("/api/login")
@@ -241,8 +268,17 @@ async def login(payload: LoginRequest):
     print(f"[/api/login] Login successful: {user['name']} ({user['email']})")
     return {
         "status": "success",
+        "success": True,
         "token": token,
-        "user": {"name": user["name"], "email": user["email"], "role": user["role"]},
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "studentId": user["studentId"],
+            "dormRoom": user["dormRoom"],
+            "phone": user["phone"],
+        },
     }
 
 # ─── Repair Endpoints ───────────────────────────────────────────────────────────
@@ -321,9 +357,15 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
     role = current_user.get("role", "student")
 
     if role != "student":
-        raise HTTPException(status_code=403, detail="Only students can create repair requests")
+        raise HTTPException(status_code=403, detail="只有学生可以提交报修申请")
 
-    if not payload.dormBuilding or not payload.dormRoom or not payload.description:
+    if payload.category not in ("water", "electricity", "furniture", "network", "other"):
+        raise HTTPException(status_code=400, detail="报修类型无效")
+
+    if payload.priority not in ("low", "normal", "high", "urgent"):
+        raise HTTPException(status_code=400, detail="优先级无效")
+
+    if not payload.dormBuilding.strip() or not payload.dormRoom.strip() or not payload.description.strip():
         raise HTTPException(status_code=400, detail="请填写所有必填项")
 
     if len(payload.description.strip()) < 5:
@@ -653,6 +695,10 @@ async def evaluate_repair(repair_id: str, payload: EvaluateRequest, current_user
 @app.post("/api/reviews")
 async def create_review(payload: CreateReviewRequest, current_user: dict = Depends(verify_token)):
     user_id = current_user.get("userId", "")
+    role = current_user.get("role", "student")
+
+    if role != "student":
+        raise HTTPException(status_code=403, detail="只有学生可以评价")
 
     if payload.rating < 1 or payload.rating > 5:
         raise HTTPException(status_code=400, detail="评分必须在1-5之间")
