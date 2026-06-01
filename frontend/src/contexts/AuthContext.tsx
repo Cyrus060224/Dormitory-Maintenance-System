@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User } from '../types';
+import { toast } from 'sonner';
 
 interface AuthContextType {
   user: User | null;
@@ -25,6 +26,13 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload.exp !== 'number') return true;
+  // 提前 60 秒判定过期，避免边界情况
+  return Date.now() >= (payload.exp * 1000 - 60_000);
+}
+
 function userFromToken(token: string): User | null {
   const payload = decodeJwtPayload(token);
   if (!payload) return null;
@@ -41,10 +49,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  // On mount: restore session from localStorage using JWT decode only
+  const logout = useCallback(() => {
+    localStorage.removeItem('token');
+    setUser(null);
+    setToken(null);
+    setIsAuthenticated(false);
+  }, []);
+
+  // On mount: restore session from localStorage, checking expiry
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
     if (storedToken) {
+      if (isTokenExpired(storedToken)) {
+        // Token 已过期，清除并提示
+        localStorage.removeItem('token');
+        setIsAuthenticated(false);
+        toast.error('登录已过期，请重新登录');
+        return;
+      }
       const decoded = userFromToken(storedToken);
       if (decoded) {
         setUser(decoded);
@@ -59,6 +81,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAuthenticated(false);
     }
   }, []);
+
+  // 监听 API 401 响应触发的自动登出事件
+  useEffect(() => {
+    const handler = () => {
+      logout();
+      toast.error('登录已过期，请重新登录');
+    };
+    window.addEventListener('auth:expired', handler);
+    return () => window.removeEventListener('auth:expired', handler);
+  }, [logout]);
 
   // login: store token and immediately set user from JWT payload
   // This is synchronous and reliable - no API call needed
@@ -75,13 +107,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log('[AuthContext] login() - user set from JWT:', decoded.name, 'role:', decoded.role);
   }
 
-  function logout() {
-    localStorage.removeItem('token');
-    setUser(null);
-    setToken(null);
-    setIsAuthenticated(false);
-  }
-
   return (
     <AuthContext.Provider value={{ user, token, isAuthenticated, login, logout }}>
       {children}
@@ -95,3 +120,4 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+

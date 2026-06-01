@@ -34,14 +34,14 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json() as { status: string; token: string; user?: { name: string; email: string; role: string }; message?: string };
+      const data = await res.json() as { status: string; token: string; user?: { name: string; email: string; role: string }; message?: string; detail?: string };
       if (data.status === 'success' && data.token) {
         login(data.token);
         localStorage.setItem('userName', data.user?.name || '');
         toast.success('登录成功');
         navigate('/dashboard', { replace: true });
       } else {
-        setError(data.message || '邮箱或密码错误');
+        setError(data.detail || data.message || '邮箱或密码错误');
       }
     } catch {
       setError('网络错误，请稍后重试');
@@ -58,7 +58,7 @@ export default function Login() {
             <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mb-4">
               <Wrench className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-foreground">宿舍报修系统</h1>
+            <h1 className="text-2xl font-bold text-foreground">智能宿舍报修平台</h1>
             <p className="text-muted-foreground mt-1">登录您的账户</p>
           </div>
 

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Eye, EyeOff, Wrench } from 'lucide-react';
 import { API } from '../../lib/api';
 
-type Role = 'student' | 'technician' | 'admin';
+type Role = 'student' | 'technician';
 
 export default function Signup() {
   const { login, isAuthenticated } = useAuth();
@@ -65,12 +65,12 @@ export default function Signup() {
           phone: form.phone || undefined,
         }),
       });
-      const data = await res.json() as { status: string; message: string };
+      const data = await res.json() as { status: string; message?: string; detail?: string };
       if (data.status === 'success') {
         toast.success('注册成功，欢迎加入！');
         navigate('/login', { replace: true });
       } else {
-        setError(data.message || '注册失败，请检查填写信息');
+        setError(data.detail || data.message || '注册失败，请检查填写信息');
       }
     } catch {
       setError('网络错误，请稍后重试');
@@ -88,15 +88,15 @@ export default function Signup() {
               <Wrench className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-foreground">创建账户</h1>
-            <p className="text-muted-foreground mt-1">加入宿舍报修系统</p>
+            <p className="text-muted-foreground mt-1">加入智能宿舍报修平台</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Role selection */}
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">账户类型</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['student', 'technician', 'admin'] as Role[]).map((r) => (
+              <div className="grid grid-cols-2 gap-2">
+                {(['student', 'technician'] as Role[]).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -107,7 +107,7 @@ export default function Signup() {
                         : 'border-border bg-background text-foreground hover:border-primary/50'
                     }`}
                   >
-                    {r === 'student' ? '学生' : r === 'technician' ? '维修人员' : '管理员'}
+                    {r === 'student' ? '学生' : '维修人员'}
                   </button>
                 ))}
               </div>

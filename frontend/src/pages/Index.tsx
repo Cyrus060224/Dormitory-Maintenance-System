@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { RepairRequest, User, Stats, ApiResponse } from '../types';
+import { RepairRequest, User, Stats, ApiResponse, PaginatedApiResponse } from '../types';
 import { toast } from 'sonner';
 import {
   Wrench, Home, ClipboardList, BarChart2, Users, LogOut,
   Plus, Star, CheckCircle, Clock,
   ChevronRight, RefreshCw, Send, Eye
 } from 'lucide-react';
-import { API, getAuthHeaders } from '../lib/api';
+import { API, authFetch } from '../lib/api';
 import EvaluationModal from '../components/custom/EvaluationModal';
+import Pagination from '../components/custom/Pagination';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
@@ -57,15 +58,23 @@ function StudentView({ token }: { token: string | null }) {
     description: '', priority: 'normal', imageUrl: '',
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 5;
+
   const loadRequests = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
-      const data = await res.json() as ApiResponse<RepairRequest[]>;
-      if (data.success) setRequests(data.data);
+      const url = `${API.REPAIRS.LIST}?page=${currentPage}&pageSize=${pageSize}`;
+      const res = await authFetch(url, token);
+      const data = await res.json() as PaginatedApiResponse<RepairRequest[]>;
+      if (data.success) {
+        setRequests(data.data);
+        setTotalCount(data.total ?? data.data.length);
+      }
     } catch { toast.error('加载失败'); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, currentPage, pageSize]);
 
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
@@ -76,9 +85,8 @@ function StudentView({ token }: { token: string | null }) {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(API.REPAIRS.CREATE, {
+      const res = await authFetch(API.REPAIRS.CREATE, token, {
         method: 'POST',
-        headers: getAuthHeaders(token),
         body: JSON.stringify({
           dormBuilding: form.dormBuilding,
           dormRoom: form.dormRoom,
@@ -92,6 +100,7 @@ function StudentView({ token }: { token: string | null }) {
       if (data.success) {
         toast.success('报修申请提交成功！');
         setForm({ dormBuilding: '', dormRoom: '', category: 'water', description: '', priority: 'normal', imageUrl: '' });
+        setCurrentPage(1);
         setView('list');
         loadRequests();
       } else {
@@ -109,9 +118,8 @@ function StudentView({ token }: { token: string | null }) {
     if (!evalTarget) return;
     setEvalLoading(true);
     try {
-      const res = await fetch(API.REPAIRS.EVALUATE(evalTarget.id), {
+      const res = await authFetch(API.REPAIRS.EVALUATE(evalTarget.id), token, {
         method: 'POST',
-        headers: getAuthHeaders(token),
         body: JSON.stringify({
           rating,
           feedbackTags: tags.join(','),
@@ -281,8 +289,8 @@ function StudentView({ token }: { token: string | null }) {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-foreground">我的报修</h2>
         <div className="flex gap-2">
-          <button onClick={loadRequests} className="p-2 rounded-xl border border-border hover:bg-muted transition">
-            <RefreshCw className="w-4 h-4 text-muted-foreground" />
+          <button onClick={loadRequests} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+            <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button onClick={() => setView('new')}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition">
@@ -342,6 +350,12 @@ function StudentView({ token }: { token: string | null }) {
               </div>
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalCount={totalCount}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+          />
         </div>
       )}
 
@@ -367,7 +381,7 @@ function TechnicianView({ token }: { token: string | null }) {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
+      const res = await authFetch(API.REPAIRS.LIST, token);
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
     } catch { toast.error('加载失败'); }
@@ -379,9 +393,8 @@ function TechnicianView({ token }: { token: string | null }) {
   async function updateTask(taskId: string, status: string) {
     setUpdating(true);
     try {
-      const res = await fetch(API.REPAIRS.UPDATE_STATUS(taskId), {
+      const res = await authFetch(API.REPAIRS.UPDATE_STATUS(taskId), token, {
         method: 'PATCH',
-        headers: getAuthHeaders(token),
         body: JSON.stringify({ status, adminNote: workNote || undefined }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
@@ -405,8 +418,8 @@ function TechnicianView({ token }: { token: string | null }) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-foreground">我的维修任务</h2>
-        <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition">
-          <RefreshCw className="w-4 h-4 text-muted-foreground" />
+        <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+          <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
@@ -527,32 +540,50 @@ function AdminView({ token }: { token: string | null }) {
   const [assigning, setAssigning] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
 
+  // Repairs Pagination State
+  const [repairsPage, setRepairsPage] = useState(1);
+  const [totalRepairs, setTotalRepairs] = useState(0);
+  const repairsPageSize = 8;
+
+  // Users Pagination State
+  const [usersPage, setUsersPage] = useState(1);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const usersPageSize = 8;
+
   const loadRepairs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(API.REPAIRS.LIST, { headers: getAuthHeaders(token) });
-      const data = await res.json() as ApiResponse<RepairRequest[]>;
-      if (data.success) setRepairs(data.data);
+      const url = `${API.REPAIRS.LIST}?page=${repairsPage}&pageSize=${repairsPageSize}&status=${filterStatus}`;
+      const res = await authFetch(url, token);
+      const data = await res.json() as PaginatedApiResponse<RepairRequest[]>;
+      if (data.success) {
+        setRepairs(data.data);
+        setTotalRepairs(data.total ?? data.data.length);
+      }
     } catch { toast.error('加载失败'); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, repairsPage, repairsPageSize, filterStatus]);
 
   const loadUsers = useCallback(async () => {
     try {
+      const url = `${API.USERS.LIST}?page=${usersPage}&pageSize=${usersPageSize}`;
       const [uRes, tRes] = await Promise.all([
-        fetch(API.USERS.LIST, { headers: getAuthHeaders(token) }),
-        fetch(API.USERS.TECHNICIANS, { headers: getAuthHeaders(token) }),
+        authFetch(url, token),
+        authFetch(API.USERS.TECHNICIANS, token),
       ]);
-      const uData = await uRes.json() as ApiResponse<User[]>;
+      const uData = await uRes.json() as PaginatedApiResponse<User[]>;
       const tData = await tRes.json() as ApiResponse<User[]>;
-      if (uData.success) setUsers(uData.data);
+      if (uData.success) {
+        setUsers(uData.data);
+        setTotalUsers(uData.total ?? uData.data.length);
+      }
       if (tData.success) setTechnicians(tData.data);
     } catch { toast.error('加载用户失败'); }
-  }, [token]);
+  }, [token, usersPage, usersPageSize]);
 
   const loadStats = useCallback(async () => {
     try {
-      const res = await fetch(API.STATS.GET, { headers: getAuthHeaders(token) });
+      const res = await authFetch(API.STATS.GET, token);
       const data = await res.json() as ApiResponse<Stats>;
       if (data.success) setStats(data.data);
     } catch { toast.error('加载统计失败'); }
@@ -569,9 +600,8 @@ function AdminView({ token }: { token: string | null }) {
     if (!selected) return;
     setAssigning(true);
     try {
-      const res = await fetch(API.REPAIRS.UPDATE_STATUS(selected.id), {
+      const res = await authFetch(API.REPAIRS.UPDATE_STATUS(selected.id), token, {
         method: 'PATCH',
-        headers: getAuthHeaders(token),
         body: JSON.stringify({
           status: assignForm.status,
           assignedTo: assignForm.assignedTo || undefined,
@@ -595,9 +625,8 @@ function AdminView({ token }: { token: string | null }) {
   async function deleteUser(userId: string) {
     if (!confirm('确定要删除该用户吗？')) return;
     try {
-      const res = await fetch(API.USERS.UPDATE(userId), {
+      const res = await authFetch(API.USERS.UPDATE(userId), token, {
         method: 'DELETE',
-        headers: getAuthHeaders(token),
       });
       const data = await res.json() as ApiResponse<null>;
       if (data.success) { toast.success('用户已删除'); loadUsers(); }
@@ -605,7 +634,7 @@ function AdminView({ token }: { token: string | null }) {
     } catch { toast.error('网络错误'); }
   }
 
-  const filteredRepairs = filterStatus === 'all' ? repairs : repairs.filter(r => r.status === filterStatus);
+  const filteredRepairs = repairs;
 
   return (
     <div>
@@ -627,14 +656,14 @@ function AdminView({ token }: { token: string | null }) {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-foreground">报修申请列表</h3>
-            <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition">
-              <RefreshCw className="w-4 h-4 text-muted-foreground" />
+            <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+              <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
           {/* Filter */}
           <div className="flex gap-2 flex-wrap mb-4">
             {['all', 'pending', 'approved', 'in_progress', 'completed', 'pending_evaluation', 'closed', 'rejected'].map((s) => (
-              <button key={s} onClick={() => setFilterStatus(s)}
+              <button key={s} onClick={() => { setFilterStatus(s); setRepairsPage(1); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   filterStatus === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}>
@@ -732,6 +761,12 @@ function AdminView({ token }: { token: string | null }) {
                   )}
                 </div>
               ))}
+              <Pagination
+                currentPage={repairsPage}
+                totalCount={totalRepairs}
+                pageSize={repairsPageSize}
+                onPageChange={setRepairsPage}
+              />
             </div>
           )}
         </div>
@@ -809,9 +844,9 @@ function AdminView({ token }: { token: string | null }) {
       {tab === 'users' && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-foreground">用户列表 ({users.length})</h3>
-            <button onClick={loadUsers} className="p-2 rounded-xl border border-border hover:bg-muted transition">
-              <RefreshCw className="w-4 h-4 text-muted-foreground" />
+            <h3 className="font-semibold text-foreground">用户列表 ({totalUsers})</h3>
+            <button onClick={loadUsers} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+              <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
           <div className="space-y-3">
@@ -840,6 +875,12 @@ function AdminView({ token }: { token: string | null }) {
                 </div>
               </div>
             ))}
+            <Pagination
+              currentPage={usersPage}
+              totalCount={totalUsers}
+              pageSize={usersPageSize}
+              onPageChange={setUsersPage}
+            />
           </div>
         </div>
       )}
@@ -847,7 +888,6 @@ function AdminView({ token }: { token: string | null }) {
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
 export default function Index() {
   const { user, token, logout } = useAuth();
 
@@ -862,23 +902,49 @@ export default function Index() {
   const roleLabel = user.role === 'student' ? '学生' : user.role === 'technician' ? '维修人员' : '管理员';
   const roleColor = user.role === 'admin' ? 'bg-purple-100 text-purple-700' : user.role === 'technician' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
 
+  const showProfile = () => {
+    toast(
+      <div className="flex flex-col gap-1 text-sm font-medium">
+        <p className="font-bold text-foreground text-base border-b border-border/50 pb-1 mb-1">👤 个人资料</p>
+        <p className="text-muted-foreground"><span className="text-foreground font-semibold">姓名：</span>{user.name}</p>
+        <p className="text-muted-foreground"><span className="text-foreground font-semibold">身份：</span>{roleLabel}</p>
+        <p className="text-muted-foreground"><span className="text-foreground font-semibold">邮箱：</span>{user.email}</p>
+        {user.studentId && <p className="text-muted-foreground"><span className="text-foreground font-semibold">学号：</span>{user.studentId}</p>}
+        {user.dormRoom && <p className="text-muted-foreground"><span className="text-foreground font-semibold">宿舍：</span>{user.dormRoom}</p>}
+        {user.phone && <p className="text-muted-foreground"><span className="text-foreground font-semibold">电话：</span>{user.phone}</p>}
+      </div>,
+      {
+        duration: 4000,
+        className: "bg-white border border-border/80 rounded-2xl shadow-xl p-4",
+      }
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="bg-white border-b border-border sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center">
+          <div 
+            onClick={() => window.location.reload()} 
+            className="flex items-center gap-3 cursor-pointer select-none group"
+            title="刷新工作台"
+          >
+            <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center group-hover:scale-105 active:scale-95 transition">
               <Wrench className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-bold text-foreground leading-tight">宿舍报修系统</h1>
+              <h1 className="font-bold text-foreground leading-tight group-hover:text-primary transition">智能宿舍报修平台</h1>
               <p className="text-xs text-muted-foreground hidden sm:block">在线报修 · 实时追踪</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+            <div 
+              onClick={showProfile}
+              className="hidden sm:flex items-center gap-2 cursor-pointer hover:bg-muted p-1.5 rounded-xl transition duration-200 active:scale-95 select-none"
+              title="查看个人资料"
+            >
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shadow-inner">
                 <span className="text-primary font-semibold text-sm">{user.name.charAt(0)}</span>
               </div>
               <div className="text-right">
@@ -908,8 +974,8 @@ export default function Index() {
                 {user.dormRoom && <span className="text-white/60 text-sm">· {user.dormRoom}</span>}
               </div>
             </div>
-            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
-              {user.role === 'student' ? <Home className="w-7 h-7 text-white" /> :
+            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center hover:scale-110 hover:rotate-6 transition duration-300 select-none shadow-lg">
+              {user.role === 'student' ? <Home className="w-7 h-7 text-white animate-bounce-subtle" /> :
                user.role === 'technician' ? <Wrench className="w-7 h-7 text-white" /> :
                <BarChart2 className="w-7 h-7 text-white" />}
             </div>

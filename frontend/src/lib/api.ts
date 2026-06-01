@@ -50,3 +50,23 @@ export function getAuthHeaders(token: string): HeadersInit {
     'Content-Type': 'application/json',
   };
 }
+
+/**
+ * 带鉴权的 fetch 封装
+ * - 自动注入 Authorization header
+ * - 检测 401 响应，触发自动登出
+ */
+export async function authFetch(url: string, token: string | null, options?: RequestInit): Promise<Response> {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      ...getAuthHeaders(token || ''),
+      ...options?.headers,
+    },
+  });
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('auth:expired'));
+    throw new Error('TOKEN_EXPIRED');
+  }
+  return res;
+}

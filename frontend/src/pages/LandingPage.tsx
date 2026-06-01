@@ -10,11 +10,14 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-blue-50">
       {/* ─── 顶部导航栏 ─────────────────────────────────────── */}
       <nav className="flex items-center justify-between px-6 md:px-12 py-4 border-b border-border/50 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+        <div 
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="flex items-center gap-2 cursor-pointer select-none"
+        >
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center hover:scale-105 active:scale-95 transition">
             <Wrench className="w-4 h-4 text-white" />
           </div>
-          <span className="text-lg font-bold text-foreground hidden sm:block">智能宿舍保修平台</span>
+          <span className="text-lg font-bold text-foreground hidden sm:block hover:text-primary transition">智能宿舍报修平台</span>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -171,7 +174,7 @@ export default function LandingPage() {
             立即登录
             <ArrowRight className="w-5 h-5" />
           </Link>
-          <p className="text-xs text-muted-foreground mt-8">© 2025 智能宿舍保修平台 · 校园后勤管理系统</p>
+          <p className="text-xs text-muted-foreground mt-8">© 2026 智能宿舍报修平台 · 校园后勤管理系统</p>
         </div>
       </section>
     </div>
@@ -181,12 +184,15 @@ export default function LandingPage() {
 /** 特性卡片组件 */
 function FeatureCard({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-border p-6 hover:shadow-md transition">
-      <div className="w-12 h-12 bg-primary/10 text-primary rounded-xl flex items-center justify-center mb-4">
+    <Link
+      to="/login"
+      className="block bg-white rounded-2xl border border-border p-6 hover:-translate-y-1.5 hover:shadow-xl hover:border-primary/30 transition duration-300 text-left group cursor-pointer"
+    >
+      <div className="w-12 h-12 bg-primary/10 text-primary rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-primary group-hover:text-primary-foreground transition duration-300">
         {icon}
       </div>
-      <h3 className="text-lg font-semibold text-foreground mb-2">{title}</h3>
+      <h3 className="text-lg font-semibold text-foreground mb-2 group-hover:text-primary transition duration-300">{title}</h3>
       <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
-    </div>
+    </Link>
   );
 }
