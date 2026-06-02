@@ -5,11 +5,17 @@ import { toast } from 'sonner';
 import {
   Wrench, Home, ClipboardList, BarChart2, Users, LogOut,
   Plus, Star, CheckCircle, Clock,
-  ChevronRight, RefreshCw, Send, Eye
+  ChevronRight, RefreshCw, Send, Eye, Shield, Lock, Phone,
+  Sparkles, AlertTriangle
 } from 'lucide-react';
 import { API, authFetch, readApiMessage } from '../lib/api';
 import EvaluationModal from '../components/custom/EvaluationModal';
 import Pagination from '../components/custom/Pagination';
+import {
+  ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid
+} from 'recharts';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
@@ -41,6 +47,64 @@ const PRIORITY_COLOR: Record<string, string> = {
 
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colorClass}`}>{label}</span>;
+}
+
+
+function SlaBadge({ slaDueDate, status }: { slaDueDate?: string; status: string }) {
+  const [timeLeft, setTimeLeft] = useState<number>(0);
+
+  useEffect(() => {
+    if (!slaDueDate || ['completed', 'pending_evaluation', 'closed', 'rejected'].includes(status)) {
+      return;
+    }
+
+    const calculateTimeLeft = () => {
+      const dueTime = new Date(slaDueDate).getTime();
+      const nowTime = Date.now();
+      setTimeLeft(dueTime - nowTime);
+    };
+
+    calculateTimeLeft();
+    const interval = setInterval(calculateTimeLeft, 1000);
+    return () => clearInterval(interval);
+  }, [slaDueDate, status]);
+
+  if (!slaDueDate || ['completed', 'pending_evaluation', 'closed', 'rejected'].includes(status)) {
+    return null;
+  }
+
+  const isOverdue = timeLeft < 0;
+  const absTime = Math.abs(timeLeft);
+  const seconds = Math.floor((absTime / 1000) % 60);
+  const minutes = Math.floor((absTime / (1000 * 60)) % 60);
+  const hours = Math.floor((absTime / (1000 * 60 * 60)));
+
+  let timeString = '';
+  if (hours > 0) {
+    timeString += `${hours}小时`;
+  }
+  timeString += `${minutes}分${seconds}秒`;
+
+  if (isOverdue) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-700 animate-pulse border border-red-200 shadow-sm">
+        <Clock className="w-3 h-3" />
+        已超时 {timeString}
+      </span>
+    );
+  }
+
+  const isUrgent = hours < 3;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+      isUrgent 
+        ? 'bg-amber-50 text-amber-700 animate-pulse border border-amber-200' 
+        : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+    } shadow-sm`}>
+      <Clock className="w-3 h-3" />
+      SLA 剩余: {timeString}
+    </span>
+  );
 }
 
 // ─── Student View ─────────────────────────────────────────────────────────────
@@ -186,15 +250,81 @@ function StudentView({ token }: { token: string | null }) {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1">问题描述 <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-foreground mb-1.5">问题描述 <span className="text-red-500">*</span></label>
               <textarea value={form.description} onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))}
-                rows={4} placeholder="请详细描述问题，至少5个字"
+                rows={4} placeholder="请详细描述问题，例如：宿舍卫生间马桶堵塞了，一直在反水，地面积水很严重，人都滑倒了。"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition resize-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1">图片链接（可选）</label>
-              <input value={form.imageUrl} onChange={(e) => setForm(p => ({ ...p, imageUrl: e.target.value }))}
-                placeholder="粘贴图片URL" className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition" />
+              <label className="block text-sm font-medium text-foreground mb-2">报修图片（最多5张，可选）</label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {/* 渲染已有图片的缩略图 */}
+                {form.imageUrl ? form.imageUrl.split(',').map((imgUrl, idx) => (
+                  <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-border group bg-muted flex items-center justify-center">
+                    <img
+                      src={imgUrl.startsWith('http') || imgUrl.startsWith('data:') ? imgUrl : `${API.BASE}${imgUrl}`}
+                      alt={`预览图片 ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const urls = form.imageUrl.split(',');
+                        urls.splice(idx, 1);
+                        setForm(p => ({ ...p, imageUrl: urls.join(',') }));
+                      }}
+                      className="absolute top-1.5 right-1.5 p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition shadow opacity-90 hover:opacity-100"
+                    >
+                      <Plus className="w-3.5 h-3.5 rotate-45" />
+                    </button>
+                  </div>
+                )) : null}
+
+                {/* 如果上传的图片小于 5 张，显示上传按钮 */}
+                {(!form.imageUrl || form.imageUrl.split(',').length < 5) && (
+                  <label className="border-2 border-dashed border-border hover:border-primary/60 rounded-xl flex flex-col items-center justify-center cursor-pointer transition bg-background hover:bg-muted/10 aspect-square min-h-[96px]">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (file.size > 5 * 1024 * 1024) {
+                          toast.error('图片大小不能超过 5MB');
+                          return;
+                        }
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        setSubmitting(true);
+                        try {
+                          const res = await authFetch(API.UPLOAD, token, {
+                            method: 'POST',
+                            body: formData,
+                          });
+                          const data = await res.json() as { success: boolean; url: string; message?: string };
+                          if (data.success) {
+                            const currentUrls = form.imageUrl ? form.imageUrl.split(',') : [];
+                            currentUrls.push(data.url);
+                            setForm(p => ({ ...p, imageUrl: currentUrls.join(',') }));
+                            toast.success('图片上传成功！');
+                          } else {
+                            toast.error(data.message || '图片上传失败');
+                          }
+                        } catch {
+                          toast.error('上传图片时发生网络错误');
+                        } finally {
+                          setSubmitting(false);
+                        }
+                      }}
+                    />
+                    <Plus className="w-5 h-5 text-muted-foreground mb-1" />
+                    <span className="text-xs text-muted-foreground text-center px-1 font-medium">添加图片</span>
+                    <span className="text-[10px] text-muted-foreground/60 text-center">{form.imageUrl ? form.imageUrl.split(',').length : 0}/5</span>
+                  </label>
+                )}
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={() => setView('list')}
@@ -230,6 +360,7 @@ function StudentView({ token }: { token: string | null }) {
             <div className="flex flex-col items-end gap-1">
               <Badge label={STATUS_LABEL[selected.status]} colorClass={STATUS_COLOR[selected.status]} />
               <Badge label={PRIORITY_LABEL[selected.priority]} colorClass={PRIORITY_COLOR[selected.priority]} />
+              <SlaBadge slaDueDate={selected.slaDueDate} status={selected.status} />
             </div>
           </div>
           <div className="border-t border-border pt-4">
@@ -238,8 +369,19 @@ function StudentView({ token }: { token: string | null }) {
           </div>
           {selected.imageUrl && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium text-muted-foreground mb-2">图片</p>
-              <img src={selected.imageUrl} alt="报修图片" className="rounded-xl max-h-48 object-cover" />
+              <p className="text-sm font-medium text-muted-foreground mb-2">报修图片</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {selected.imageUrl.split(',').map((imgUrl, idx) => (
+                  <div key={idx} className="relative aspect-video rounded-xl overflow-hidden border border-border bg-muted flex items-center justify-center cursor-zoom-in">
+                    <img
+                      src={imgUrl.startsWith('http') || imgUrl.startsWith('data:') ? imgUrl : `${API.BASE}${imgUrl}`}
+                      alt={`报修图片 ${idx + 1}`}
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
+                      onClick={() => window.open(imgUrl.startsWith('http') || imgUrl.startsWith('data:') ? imgUrl : `${API.BASE}${imgUrl}`, '_blank')}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {selected.adminNote && (
@@ -337,6 +479,7 @@ function StudentView({ token }: { token: string | null }) {
                 <div className="flex flex-col items-end gap-2 shrink-0">
                   <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
                   <Badge label={PRIORITY_LABEL[r.priority]} colorClass={PRIORITY_COLOR[r.priority]} />
+                  <SlaBadge slaDueDate={r.slaDueDate} status={r.status} />
                   {/* 待评价状态显示高亮按钮 */}
                   {r.status === 'pending_evaluation' && (
                     <button
@@ -462,7 +605,10 @@ function TechnicianView({ token }: { token: string | null }) {
                   <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{t.description}</p>
                   {t.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{t.studentName}</p>}
                 </div>
-                <Badge label={STATUS_LABEL[t.status]} colorClass={STATUS_COLOR[t.status]} />
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <Badge label={STATUS_LABEL[t.status]} colorClass={STATUS_COLOR[t.status]} />
+                  <SlaBadge slaDueDate={t.slaDueDate} status={t.status} />
+                </div>
               </div>
               {t.adminNote && (
                 <div className="mt-3 pt-3 border-t border-border">
@@ -643,6 +789,20 @@ function AdminView({ token }: { token: string | null }) {
 
   const filteredRepairs = repairs;
 
+  const pieData = stats?.categoryStats?.map(({ category, count }) => ({
+    name: CATEGORY_LABEL[category] || category,
+    value: count
+  })) || [];
+
+  const barData = stats ? [
+    { name: '待处理', count: stats.pendingRequests, color: '#f59e0b' },
+    { name: '维修中', count: stats.inProgressRequests, color: '#8b5cf6' },
+    { name: '已完成', count: stats.completedRequests, color: '#10b981' },
+    { name: '已拒绝', count: stats.rejectedRequests || 0, color: '#ef4444' }
+  ] : [];
+
+  const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#6b7280'];
+
   return (
     <div>
       {/* Tabs */}
@@ -702,6 +862,21 @@ function AdminView({ token }: { token: string | null }) {
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{r.description}</p>
                       {r.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{r.studentName}</p>}
                       {r.assignedToName && <p className="text-xs text-muted-foreground">维修员：{r.assignedToName}</p>}
+                      {/* AI 智能质检预警 */}
+                      {user?.role === 'admin' && r.status === 'pending' && (r.aiCategory || r.aiPriority) && (r.category !== r.aiCategory || r.priority !== r.aiPriority) && (
+                        <div className="mt-2 p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs flex items-start gap-1.5 animate-pulse">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold text-amber-900 block mb-0.5">AI 智能质检审核建议</span>
+                            {r.category !== r.aiCategory && (
+                              <span className="block">• 分类不匹配：学生选择“{CATEGORY_LABEL[r.category] || r.category}”，AI 评估最契合“{CATEGORY_LABEL[r.aiCategory!] || r.aiCategory}”</span>
+                            )}
+                            {r.priority !== r.aiPriority && (
+                              <span className="block">• 优先级不匹配：学生自主选择“{PRIORITY_LABEL[r.priority] || r.priority}”，AI 智能建议设为“{PRIORITY_LABEL[r.aiPriority!] || r.aiPriority}”{r.priority === 'urgent' || r.priority === 'high' ? '（疑似主观评级偏高）' : ''}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground mt-1">{new Date(r.createdAt).toLocaleString('zh-CN')}</p>
                       {/* 评价信息显示 */}
                       {r.rating && r.rating > 0 && (
@@ -717,6 +892,7 @@ function AdminView({ token }: { token: string | null }) {
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
+                      <SlaBadge slaDueDate={r.slaDueDate} status={r.status} />
                       <button onClick={() => { setSelected(r); setAssignForm({ status: r.status, assignedTo: r.assignedTo || '', adminNote: r.adminNote || '' }); }}
                         className="flex items-center gap-1 text-xs text-primary hover:underline">
                         <Eye className="w-3 h-3" />处理
@@ -745,9 +921,15 @@ function AdminView({ token }: { token: string | null }) {
                           <select value={assignForm.assignedTo} onChange={(e) => setAssignForm(p => ({ ...p, assignedTo: e.target.value }))}
                             className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
                             <option value="">不分配</option>
-                            {technicians.map((t) => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
+                            {technicians.map((t) => {
+                              const count = t.activeTasksCount || 0;
+                              const label = count === 0 ? '空闲' : `${count}单在办`;
+                              return (
+                                <option key={t.id} value={t.id}>
+                                  {t.name} ({label})
+                                </option>
+                              );
+                            })}
                           </select>
                         </div>
                       </div>
@@ -797,51 +979,105 @@ function AdminView({ token }: { token: string | null }) {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-white rounded-2xl shadow-sm border border-border p-5">
-              <h4 className="font-semibold text-foreground mb-4">用户统计</h4>
-              <div className="space-y-3">
-                {[
-                  { label: '总用户数', value: stats.totalUsers },
-                  { label: '学生', value: stats.studentCount },
-                  { label: '维修人员', value: stats.technicianCount },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">{label}</span>
-                    <span className="font-semibold text-foreground">{value}</span>
-                  </div>
-                ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 柱状图：工单状态分布 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
+              <h4 className="font-semibold text-foreground mb-4">工单状态分布</h4>
+              <div className="h-[240px] w-full flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="name" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ fill: '#f3f4f6', opacity: 0.5 }} contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={40}>
+                      {barData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-border p-5">
-              <h4 className="font-semibold text-foreground mb-4">报修类型分布</h4>
-              <div className="space-y-2">
-                {stats.categoryStats.map(({ category, count }) => (
-                  <div key={category} className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">{CATEGORY_LABEL[category] || category}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full"
-                          style={{ width: `${stats.totalRequests > 0 ? (count / stats.totalRequests) * 100 : 0}%` }} />
-                      </div>
-                      <span className="text-sm font-medium text-foreground w-6 text-right">{count}</span>
-                    </div>
+
+            {/* 饼图：报修类型分布 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
+              <h4 className="font-semibold text-foreground mb-4">报修类型占比</h4>
+              {pieData.length > 0 ? (
+                <div className="h-[240px] w-full flex-1 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="h-[180px] w-[180px] flex-shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={65}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
-                ))}
-              </div>
+                  <div className="flex flex-col gap-1.5 flex-1 w-full pl-0 sm:pl-2">
+                    {pieData.map((entry, index) => (
+                      <div key={entry.name} className="flex items-center justify-between text-xs w-full">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                          <span className="text-muted-foreground font-medium truncate">{entry.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 font-semibold text-foreground flex-shrink-0">
+                          <span>{entry.value}</span>
+                          <span className="text-muted-foreground/50 font-normal">({stats.totalRequests > 0 ? ((entry.value / stats.totalRequests) * 100).toFixed(0) : 0}%)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">暂无类型统计数据</div>
+              )}
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-border p-5">
-            <h4 className="font-semibold text-foreground mb-2">平均服务评分</h4>
-            <div className="flex items-center gap-3">
-              <span className="text-4xl font-bold text-foreground">{stats.avgRating}</span>
-              <div className="flex gap-1">
-                {[1,2,3,4,5].map((s) => (
-                  <Star key={s} className={`w-5 h-5 ${s <= Math.round(Number(stats.avgRating)) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* 用户统计卡片 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-border p-5">
+              <h4 className="font-semibold text-foreground mb-4">用户统计</h4>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: '总用户数', value: stats.totalUsers, color: 'text-primary' },
+                  { label: '注册学生', value: stats.studentCount, color: 'text-foreground' },
+                  { label: '维修师傅', value: stats.technicianCount, color: 'text-foreground' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-muted/30 rounded-xl p-3 text-center">
+                    <p className={`text-xl font-bold ${color}`}>{value}</p>
+                    <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{label}</p>
+                  </div>
                 ))}
               </div>
-              <span className="text-muted-foreground text-sm">/ 5.0</span>
+            </div>
+
+            {/* 评分卡片 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col justify-between">
+              <h4 className="font-semibold text-foreground mb-2">平均服务评分</h4>
+              <div className="flex items-center gap-4 py-2">
+                <span className="text-4xl font-extrabold text-foreground tracking-tight">{stats.avgRating}</span>
+                <div className="flex flex-col gap-1">
+                  <div className="flex gap-0.5">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star key={s} className={`w-5 h-5 ${s <= Math.round(Number(stats.avgRating)) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground font-medium">基于已有工单评价</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -897,6 +1133,25 @@ function AdminView({ token }: { token: string | null }) {
 
 export default function Index() {
   const { user, token, logout } = useAuth();
+  const [profile, setProfile] = useState<User | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const loadProfile = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await authFetch(API.AUTH.ME, token);
+      const data = await res.json() as ApiResponse<User>;
+      if (data.success) {
+        setProfile(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load profile:', err);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   if (!user) {
     return (
@@ -906,19 +1161,20 @@ export default function Index() {
     );
   }
 
-  const roleLabel = user.role === 'student' ? '学生' : user.role === 'technician' ? '维修人员' : '管理员';
-  const roleColor = user.role === 'admin' ? 'bg-purple-100 text-purple-700' : user.role === 'technician' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
+  const displayProfile = profile || user;
+  const roleLabel = displayProfile.role === 'student' ? '学生' : displayProfile.role === 'technician' ? '维修人员' : '管理员';
+  const roleColor = displayProfile.role === 'admin' ? 'bg-purple-100 text-purple-700' : displayProfile.role === 'technician' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
 
   const showProfile = () => {
     toast(
       <div className="flex flex-col gap-1 text-sm font-medium">
         <p className="font-bold text-foreground text-base border-b border-border/50 pb-1 mb-1">👤 个人资料</p>
-        <p className="text-muted-foreground"><span className="text-foreground font-semibold">姓名：</span>{user.name}</p>
+        <p className="text-muted-foreground"><span className="text-foreground font-semibold">姓名：</span>{displayProfile.name}</p>
         <p className="text-muted-foreground"><span className="text-foreground font-semibold">身份：</span>{roleLabel}</p>
-        <p className="text-muted-foreground"><span className="text-foreground font-semibold">邮箱：</span>{user.email}</p>
-        {user.studentId && <p className="text-muted-foreground"><span className="text-foreground font-semibold">学号：</span>{user.studentId}</p>}
-        {user.dormRoom && <p className="text-muted-foreground"><span className="text-foreground font-semibold">宿舍：</span>{user.dormRoom}</p>}
-        {user.phone && <p className="text-muted-foreground"><span className="text-foreground font-semibold">电话：</span>{user.phone}</p>}
+        <p className="text-muted-foreground"><span className="text-foreground font-semibold">邮箱：</span>{displayProfile.email}</p>
+        {displayProfile.studentId && <p className="text-muted-foreground"><span className="text-foreground font-semibold">学号：</span>{displayProfile.studentId}</p>}
+        {displayProfile.dormRoom && <p className="text-muted-foreground"><span className="text-foreground font-semibold">宿舍：</span>{displayProfile.dormRoom}</p>}
+        {displayProfile.phone && <p className="text-muted-foreground"><span className="text-foreground font-semibold">电话：</span>{displayProfile.phone}</p>}
       </div>,
       {
         duration: 4000,
@@ -947,15 +1203,15 @@ export default function Index() {
           </div>
           <div className="flex items-center gap-3">
             <div 
-              onClick={showProfile}
+              onClick={() => setIsSettingsOpen(true)}
               className="hidden sm:flex items-center gap-2 cursor-pointer hover:bg-muted p-1.5 rounded-xl transition duration-200 active:scale-95 select-none"
-              title="查看个人资料"
+              title="个人设置"
             >
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shadow-inner">
-                <span className="text-primary font-semibold text-sm">{user.name.charAt(0)}</span>
+                <span className="text-primary font-semibold text-sm">{displayProfile.name.charAt(0)}</span>
               </div>
               <div className="text-right">
-                <p className="text-sm font-medium text-foreground leading-tight">{user.name}</p>
+                <p className="text-sm font-medium text-foreground leading-tight">{displayProfile.name}</p>
                 <Badge label={roleLabel} colorClass={roleColor} />
               </div>
             </div>
@@ -971,19 +1227,19 @@ export default function Index() {
       {/* Main content */}
       <main className="max-w-5xl mx-auto px-4 py-6">
         {/* Welcome banner */}
-        <div className="bg-gradient-to-r from-primary to-blue-600 rounded-2xl p-5 mb-6 text-white">
+        <div className="bg-gradient-to-r from-primary to-blue-600 rounded-2xl p-5 mb-6 text-white shadow-md">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-white/80 text-sm">欢迎回来</p>
-              <h2 className="text-xl font-bold mt-0.5">{user.name}</h2>
+              <h2 className="text-xl font-bold mt-0.5">{displayProfile.name}</h2>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-white/80 text-sm">{roleLabel}</span>
-                {user.dormRoom && <span className="text-white/60 text-sm">· {user.dormRoom}</span>}
+                {displayProfile.dormRoom && <span className="text-white/60 text-sm">· {displayProfile.dormRoom}</span>}
               </div>
             </div>
             <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center hover:scale-110 hover:rotate-6 transition duration-300 select-none shadow-lg">
-              {user.role === 'student' ? <Home className="w-7 h-7 text-white animate-bounce-subtle" /> :
-               user.role === 'technician' ? <Wrench className="w-7 h-7 text-white" /> :
+              {displayProfile.role === 'student' ? <Home className="w-7 h-7 text-white animate-bounce-subtle" /> :
+               displayProfile.role === 'technician' ? <Wrench className="w-7 h-7 text-white" /> :
                <BarChart2 className="w-7 h-7 text-white" />}
             </div>
           </div>
@@ -994,6 +1250,260 @@ export default function Index() {
         {user.role === 'technician' && <TechnicianView token={token} />}
         {user.role === 'admin' && <AdminView token={token} />}
       </main>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        token={token}
+        initialProfile={displayProfile}
+        onProfileUpdated={loadProfile}
+      />
+    </div>
+  );
+}
+
+function SettingsModal({
+  isOpen,
+  onClose,
+  token,
+  initialProfile,
+  onProfileUpdated
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  token: string | null;
+  initialProfile: User | null;
+  onProfileUpdated: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<'profile' | 'password'>('profile');
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    phone: '',
+    studentId: '',
+    dormRoom: ''
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    oldPassword: '',
+    newPassword: '',
+    confirmNewPassword: ''
+  });
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (initialProfile) {
+      setProfileForm({
+        name: initialProfile.name || '',
+        phone: initialProfile.phone || '',
+        studentId: initialProfile.studentId || '',
+        dormRoom: initialProfile.dormRoom || ''
+      });
+    }
+  }, [initialProfile, isOpen]);
+
+  if (!isOpen || !initialProfile) return null;
+
+  async function handleUpdateProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!profileForm.name.trim()) {
+      toast.error('姓名不能为空');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await authFetch(API.USERS.UPDATE_PROFILE, token, {
+        method: 'PUT',
+        body: JSON.stringify(profileForm),
+      });
+      const data = await res.json() as ApiResponse<User>;
+      if (data.success) {
+        toast.success('资料更新成功！');
+        onProfileUpdated();
+        onClose();
+      } else {
+        toast.error(data.message || '更新失败');
+      }
+    } catch {
+      toast.error('网络错误，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordForm.oldPassword || !passwordForm.newPassword || !passwordForm.confirmNewPassword) {
+      toast.error('请填写所有密码字段');
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      toast.error('新密码长度不能少于6位');
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      toast.error('两次输入的新密码不一致');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await authFetch(API.USERS.CHANGE_PASSWORD, token, {
+        method: 'POST',
+        body: JSON.stringify(passwordForm),
+      });
+      const data = await res.json() as ApiResponse<null>;
+      if (data.success) {
+        toast.success('密码修改成功！请牢记您的新密码');
+        setPasswordForm({ oldPassword: '', newPassword: '', confirmNewPassword: '' });
+        onClose();
+      } else {
+        toast.error(data.message || '修改密码失败');
+      }
+    } catch {
+      toast.error('网络错误，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-border overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="flex border-b border-border bg-muted/20">
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-1.5 transition ${
+              activeTab === 'profile' ? 'border-b-2 border-primary text-primary bg-white' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            基本资料
+          </button>
+          <button
+            onClick={() => setActiveTab('password')}
+            className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-1.5 transition ${
+              activeTab === 'password' ? 'border-b-2 border-primary text-primary bg-white' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Lock className="w-4 h-4" />
+            修改密码
+          </button>
+        </div>
+
+        <div className="p-6">
+          {activeTab === 'profile' ? (
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">姓名 <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm(p => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">电话</label>
+                <input
+                  type="text"
+                  value={profileForm.phone}
+                  onChange={(e) => setProfileForm(p => ({ ...p, phone: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                  placeholder="未填写电话"
+                />
+              </div>
+              {initialProfile.role === 'student' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">学号</label>
+                    <input
+                      type="text"
+                      value={profileForm.studentId}
+                      onChange={(e) => setProfileForm(p => ({ ...p, studentId: e.target.value }))}
+                      className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                      placeholder="未填写学号"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">宿舍号</label>
+                    <input
+                      type="text"
+                      value={profileForm.dormRoom}
+                      onChange={(e) => setProfileForm(p => ({ ...p, dormRoom: e.target.value }))}
+                      className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                      placeholder="如：A-101"
+                    />
+                  </div>
+                </>
+              )}
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-foreground text-sm font-semibold hover:bg-muted transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50"
+                >
+                  {loading ? '保存中...' : '保存修改'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">当前密码 <span className="text-red-500">*</span></label>
+                <input
+                  type="password"
+                  value={passwordForm.oldPassword}
+                  onChange={(e) => setPasswordForm(p => ({ ...p, oldPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                  placeholder="请输入当前密码"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">新密码 <span className="text-red-500">*</span></label>
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm(p => ({ ...p, newPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                  placeholder="至少6位"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1">确认新密码 <span className="text-red-500">*</span></label>
+                <input
+                  type="password"
+                  value={passwordForm.confirmNewPassword}
+                  onChange={(e) => setPasswordForm(p => ({ ...p, confirmNewPassword: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition pr-10"
+                  placeholder="再次输入新密码"
+                />
+              </div>
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-foreground text-sm font-semibold hover:bg-muted transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50"
+                >
+                  {loading ? '修改中...' : '确认修改'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

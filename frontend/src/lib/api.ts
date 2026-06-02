@@ -4,6 +4,7 @@ const API_BASE_URL = isDev ? '' : (import.meta.env.VITE_API_BASE_URL || 'http://
 
 export const API = {
   BASE: API_BASE_URL,
+  UPLOAD: `${API_BASE_URL}/api/upload`,
   AUTH: {
     LOGIN: `${API_BASE_URL}/api/login`,
     SIGNUP: `${API_BASE_URL}/api/register`,
@@ -14,6 +15,7 @@ export const API = {
     CREATE: `${API_BASE_URL}/api/repairs`,
     UPDATE_STATUS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/status`,
     EVALUATE: (id: string) => `${API_BASE_URL}/api/repairs/${id}/evaluate`,
+    ANALYZE: `${API_BASE_URL}/api/repairs/analyze`,
   },
   REVIEWS: {
     CREATE: `${API_BASE_URL}/api/reviews`,
@@ -22,6 +24,8 @@ export const API = {
     LIST: `${API_BASE_URL}/api/users`,
     TECHNICIANS: `${API_BASE_URL}/api/users/technicians`,
     UPDATE: (id: string) => `${API_BASE_URL}/api/users/${id}`,
+    UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
+    CHANGE_PASSWORD: `${API_BASE_URL}/api/users/change-password`,
   },
   STATS: {
     GET: `${API_BASE_URL}/api/stats`,
@@ -29,12 +33,18 @@ export const API = {
 };
 
 export async function apiRequest(url: string, options?: RequestInit): Promise<Response> {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options?.headers,
+  } as Record<string, string>;
+
+  if (options?.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -57,12 +67,18 @@ export function getAuthHeaders(token: string | null): HeadersInit {
  * - 检测 401 响应，触发自动登出
  */
 export async function authFetch(url: string, token: string | null, options?: RequestInit): Promise<Response> {
+  const headers = {
+    ...getAuthHeaders(token || ''),
+    ...options?.headers,
+  } as Record<string, string>;
+
+  if (options?.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   const res = await fetch(url, {
     ...options,
-    headers: {
-      ...getAuthHeaders(token || ''),
-      ...options?.headers,
-    },
+    headers,
   });
   if (res.status === 401) {
     window.dispatchEvent(new CustomEvent('auth:expired'));

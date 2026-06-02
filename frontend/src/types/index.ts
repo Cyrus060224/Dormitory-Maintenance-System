@@ -7,6 +7,7 @@ export interface User {
   dormRoom?: string;
   phone?: string;
   createdAt?: string;
+  activeTasksCount?: number;
 }
 
 export interface RepairRequest {
@@ -26,10 +27,12 @@ export interface RepairRequest {
   updatedAt: string;
   studentName?: string;
   assignedToName?: string;
-  // 评价字段
   rating?: number;
   feedbackTags?: string;
-  feedbackText?: string;
+  slaDueDate?: string;
+  slaBreached?: number;
+  aiCategory?: 'water' | 'electricity' | 'furniture' | 'network' | 'other';
+  aiPriority?: 'low' | 'normal' | 'high' | 'urgent';
 }
 
 export interface RepairTask {

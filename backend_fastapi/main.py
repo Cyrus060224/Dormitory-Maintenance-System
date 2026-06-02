@@ -2,16 +2,26 @@ import sqlite3
 import time
 import os
 import uuid
+import httpx
+import json
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
 app = FastAPI(title="Dorm Repair API")
+
+# Ensure uploads directory exists
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount static uploads hosting
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 def parse_cors_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
@@ -21,7 +31,7 @@ def parse_cors_origins() -> list[str]:
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,6 +126,10 @@ def init_db():
             rating INTEGER,
             feedbackTags TEXT,
             feedbackText TEXT,
+            slaDueDate TEXT,
+            slaBreached INTEGER DEFAULT 0,
+            aiCategory TEXT,
+            aiPriority TEXT,
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
         )
@@ -139,7 +153,7 @@ def init_db():
 
 
 def migration_add_columns(conn: sqlite3.Connection):
-    """为已有数据库添加评价相关字段（SQLite 不支持直接 ADD COLUMN IF NOT EXISTS）"""
+    """为已有数据库添加评价及SLA相关字段（SQLite 不支持直接 ADD COLUMN IF NOT EXISTS）"""
     try:
         # 检查 rating 字段是否存在
         columns = [row[1] for row in conn.execute("PRAGMA table_info(repairs)").fetchall()]
@@ -151,6 +165,14 @@ def migration_add_columns(conn: sqlite3.Connection):
             conn.execute("ALTER TABLE repairs ADD COLUMN feedbackText TEXT")
         if 'workNote' not in columns:
             conn.execute("ALTER TABLE repairs ADD COLUMN workNote TEXT")
+        if 'slaDueDate' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN slaDueDate TEXT")
+        if 'slaBreached' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN slaBreached INTEGER DEFAULT 0")
+        if 'aiCategory' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN aiCategory TEXT")
+        if 'aiPriority' not in columns:
+            conn.execute("ALTER TABLE repairs ADD COLUMN aiPriority TEXT")
     except Exception as e:
         print(f"[Migration] Error: {e}")
 
@@ -212,6 +234,23 @@ class UpdateRepairStatus(BaseModel):
     workNote: Optional[str] = None
 
 
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    studentId: Optional[str] = None
+    dormRoom: Optional[str] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    oldPassword: str
+    newPassword: str
+    confirmNewPassword: str
+
+
+class AnalyzeRepairRequest(BaseModel):
+    description: str
+
+
 # ─── Auth Endpoints ─────────────────────────────────────────────────────────────
 @app.post("/api/register")
 async def register(payload: SignupRequest):
@@ -225,6 +264,8 @@ async def register(payload: SignupRequest):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="密码长度不能少于6位")
+    if payload.confirmPassword is not None and payload.password != payload.confirmPassword:
+        raise HTTPException(status_code=400, detail="两次输入的密码不一致")
 
     conn = get_db()
     try:
@@ -351,6 +392,118 @@ async def get_repairs(
         return {"success": True, "data": data, "total": total}
 
 
+async def _get_ai_analysis(description: str) -> tuple[str, str, str]:
+    desc = description.lower()
+
+    # 轨 1：尝试使用本地大模型 Ollama Llama3 进行高级语义分析
+    try:
+        async with httpx.AsyncClient() as client:
+            system_prompt = (
+                "You are a professional university dormitory repair analyzer. Classify the user's repair description into exactly one category and one priority.\n\n"
+                "Categories:\n"
+                "- 'water': plumbing, water leak, bathroom, toilet, hot/cold water, shower, faucets.\n"
+                "- 'electricity': power socket, lights, electricity trip, switches, wires, electrical appliances.\n"
+                "- 'furniture': bed, table, chair, desk, cabinet, door, window, lock, keys, glass.\n"
+                "- 'network': internet connection, campus network, router, WiFi, Ethernet cables.\n"
+                "- 'other': anything else.\n\n"
+                "Priorities:\n"
+                "- 'urgent': Extreme hazards requiring immediate response, like electrical fires, live wires exposed, flooding/heavy bursts of water, locked out of dorm room late at night.\n"
+                "- 'high': Severe inconvenience but not immediate physical danger, like no water, no electricity, toilet clogged, door/lock completely broken, window broken in bad weather, network down during exams.\n"
+                "- 'normal': Standard maintenance like slightly loose table legs, a flickering lightbulb, slow network, creaking door hinges.\n"
+                "- 'low': Trivial requests, very brief descriptions, or cosmetically minor flaws.\n\n"
+                "Respond ONLY with a valid JSON object in this format:\n"
+                "{\n  \"category\": \"water\" | \"electricity\" | \"furniture\" | \"network\" | \"other\",\n  \"priority\": \"low\" | \"normal\" | \"high\" | \"urgent\"\n}"
+            )
+            
+            response = await client.post(
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": "llama3:8b",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Description: {description}"}
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.0},
+                    "format": "json"
+                },
+                timeout=2.0
+            )
+            
+            if response.status_code == 200:
+                res_json = response.json()
+                content = res_json.get("message", {}).get("content", "").strip()
+                parsed = json.loads(content)
+                cat = parsed.get("category")
+                pri = parsed.get("priority")
+                if cat in ("water", "electricity", "furniture", "network", "other") and \
+                   pri in ("low", "normal", "high", "urgent"):
+                    return cat, pri, "ollama_llama3"
+    except Exception as e:
+        # Fallback silently to rule engine in production, log details for server output
+        print(f"[AI Analyzer] Ollama Llama3 analysis failed or timed out: {e}. Falling back to Rule Engine.")
+
+    # 轨 2：备用/降级方案 ── 升级版本地词法与情感词助推分类引擎
+    categories = {
+        "water": ["水", "漏水", "水管", "水龙头", "漏雨", "下水道", "马桶", "堵", "排水", "热水", "冷水", "花洒", "地漏", "喷水", "滴水", "爆管", "阀门"],
+        "electricity": ["电", "插座", "灯", "断电", "没电", "跳闸", "开关", "电线", "灯管", "漏电", "短路", "电器", "空调", "热水器", "烧坏"],
+        "furniture": ["床", "椅子", "桌子", "柜子", "门", "窗", "锁", "合页", "把手", "玻璃", "衣柜", "床架", "抽屉", "合叶", "木工", "钥匙", "开不了"],
+        "network": ["网", "校园网", "路由器", "宽带", "网络", "断网", "网线", "连不上", "网速", "WiFi", "wifi", "上网", "接口", "网口", "无线"],
+    }
+
+    urgent_hazard_keywords = ["漏电", "着火", "起火", "爆炸", "触电", "电线冒烟", "起火花", "爆裂喷水", "大水漫灌", "水管爆裂"]
+    high_hazard_keywords = ["无法锁门", "锁坏了", "没水", "没电", "马桶堵塞", "地面积水", "开不了锁", "无法关窗", "玻璃碎了", "钥匙断在锁里", "天花板漏水"]
+    urgency_booster_keywords = ["紧急", "特急", "急需", "火速", "马上", "非常急", "极其严重", "十万火急", "危险", "速来", "马上要用", "尽快", "快来"]
+
+    # 计算分类匹配分数
+    scores = {cat: 0 for cat in categories}
+    for cat, keywords in categories.items():
+        for kw in keywords:
+            if kw in desc:
+                scores[cat] += desc.count(kw)
+
+    recommended_category = "other"
+    max_score = 0
+    for cat, score in scores.items():
+        if score > max_score:
+            max_score = score
+            recommended_category = cat
+
+    # 基础优先级评估
+    base_priority = "normal"
+    if any(kw in desc for kw in urgent_hazard_keywords):
+        base_priority = "urgent"
+    elif any(kw in desc for kw in high_hazard_keywords):
+        base_priority = "high"
+    elif len(desc.strip()) < 8:
+        base_priority = "low"
+
+    # 情感/主观语气修饰词助推器 (Booster)
+    recommended_priority = base_priority
+    if any(kw in desc for kw in urgency_booster_keywords):
+        if base_priority == "low":
+            recommended_priority = "normal"
+        elif base_priority == "normal":
+            recommended_priority = "high"
+        elif base_priority == "high":
+            recommended_priority = "urgent"
+
+    return recommended_category, recommended_priority, "rule_booster"
+
+
+@app.post("/api/repairs/analyze")
+async def analyze_repair(payload: AnalyzeRepairRequest, current_user: dict = Depends(verify_token)):
+    cat, pri, eng = await _get_ai_analysis(payload.description)
+    return {
+        "success": True,
+        "data": {
+            "category": cat,
+            "priority": pri,
+            "engine": eng
+        }
+    }
+
+
 @app.post("/api/repairs")
 async def create_repair(payload: CreateRepairRequest, current_user: dict = Depends(verify_token)):
     user_id = current_user.get("userId", "")
@@ -371,17 +524,25 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
     if len(payload.description.strip()) < 5:
         raise HTTPException(status_code=400, detail="问题描述至少需要5个字")
 
+    # 运行后台静默双轨 AI 分类与评级评估
+    ai_cat, ai_pri, _ = await _get_ai_analysis(payload.description)
+
     repair_id = str(uuid.uuid4())
     now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+    # 计算 SLA 截至时间 (基于 UTC 时间戳)
+    sla_hours = {"urgent": 2, "high": 6, "normal": 24, "low": 48}
+    hours = sla_hours.get(payload.priority, 24)
+    sla_due_date = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     conn = get_db()
     try:
         conn.execute(
             """INSERT INTO repairs 
-               (id, studentId, dormBuilding, dormRoom, category, description, imageUrl, status, priority, assignedTo, adminNote, createdAt, updatedAt) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, studentId, dormBuilding, dormRoom, category, description, imageUrl, status, priority, assignedTo, adminNote, slaDueDate, slaBreached, aiCategory, aiPriority, createdAt, updatedAt) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (repair_id, user_id, payload.dormBuilding, payload.dormRoom, payload.category,
-             payload.description, payload.imageUrl, "pending", payload.priority, None, None, now, now),
+             payload.description, payload.imageUrl, "pending", payload.priority, None, None, sla_due_date, 0, ai_cat, ai_pri, now, now),
         )
         conn.commit()
 
@@ -397,7 +558,7 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
     finally:
         conn.close()
 
-    print(f"[/api/repairs] Repair created: {repair_id} by {current_user.get('name')}")
+    print(f"[/api/repairs] Repair created: {repair_id} by {current_user.get('name')}. AI Silently Evaluated: {ai_cat} ({ai_pri})")
     return {"success": True, "data": dict(row)}
 
 
@@ -452,6 +613,10 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
         if payload.status is not None:
             updates.append("status = ?")
             values.append(payload.status)
+
+        if payload.workNote is not None:
+            updates.append("workNote = ?")
+            values.append(payload.workNote)
 
         if role == "admin":
             if payload.assignedTo is not None:
@@ -551,10 +716,8 @@ async def get_stats(current_user: dict = Depends(verify_token)):
 async def get_users(
     page: Optional[int] = None,
     pageSize: Optional[int] = None,
-    current_user: dict = Depends(verify_token)
+    current_user: dict = Depends(require_admin)
 ):
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可查看用户列表")
     conn = get_db()
     try:
         total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -584,16 +747,20 @@ async def get_users(
 async def get_technicians(current_user: dict = Depends(verify_token)):
     conn = get_db()
     try:
-        rows = conn.execute("SELECT id, name, email, role FROM users WHERE role = 'technician'").fetchall()
+        rows = conn.execute("""
+            SELECT u.id, u.name, u.email, u.role,
+                   (SELECT COUNT(*) FROM repairs r 
+                    WHERE r.assignedTo = u.id AND r.status IN ('approved', 'in_progress')) as activeTasksCount
+            FROM users u
+            WHERE u.role = 'technician'
+        """).fetchall()
     finally:
         conn.close()
     return {"success": True, "data": [dict(r) for r in rows]}
 
 
 @app.delete("/api/users/{user_id}")
-async def delete_user(user_id: str, current_user: dict = Depends(verify_token)):
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可删除用户")
+async def delete_user(user_id: str, current_user: dict = Depends(require_admin)):
     conn = get_db()
     try:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
@@ -617,6 +784,115 @@ async def get_current_user(current_user: dict = Depends(verify_token)):
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return {"success": True, "data": dict(user)}
+
+
+@app.post("/api/upload")
+async def upload_image(file: UploadFile = File(...), current_user: dict = Depends(verify_token)):
+    # 限制支持的文件格式
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".gif"}
+    _, ext = os.path.splitext(file.filename)
+    if ext.lower() not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="只允许上传图片格式 (.png, .jpg, .jpeg, .gif)")
+
+    # 限制文件大小在 5MB 以内
+    max_size = 5 * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 5MB")
+
+    # 生成随机且安全的文件名保存
+    filename = f"{uuid.uuid4()}{ext.lower()}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        print(f"上传文件写入错误: {e}")
+        raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试")
+
+    # 返回文件的相对托管 URL，Vite 开发环境已配置 /uploads 代理
+    url = f"/uploads/{filename}"
+    return {"success": True, "url": url}
+
+
+@app.put("/api/users/profile")
+async def update_profile(payload: UpdateProfileRequest, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+
+    conn = get_db()
+    try:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+
+        updates = []
+        values = []
+
+        if payload.name is not None:
+            updates.append("name = ?")
+            values.append(payload.name)
+
+        if payload.phone is not None:
+            updates.append("phone = ?")
+            values.append(payload.phone)
+
+        if user["role"] == "student":
+            if payload.studentId is not None:
+                updates.append("studentId = ?")
+                values.append(payload.studentId)
+            if payload.dormRoom is not None:
+                updates.append("dormRoom = ?")
+                values.append(payload.dormRoom)
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="未提供任何修改字段")
+
+        values.append(user_id)
+        conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", values)
+        conn.commit()
+
+        # 重新获取最新的用户信息并返回
+        updated_user = conn.execute(
+            "SELECT id, name, email, role, studentId, dormRoom, phone, createdAt FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    print(f"[/api/users/profile] User profile updated: {user_id}")
+    return {"success": True, "data": dict(updated_user)}
+
+
+@app.post("/api/users/change-password")
+async def change_password(payload: ChangePasswordRequest, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+
+    if len(payload.newPassword) < 6:
+        raise HTTPException(status_code=400, detail="新密码长度不能少于6位")
+
+    if payload.newPassword != payload.confirmNewPassword:
+        raise HTTPException(status_code=400, detail="两次输入的新密码不一致")
+
+    conn = get_db()
+    try:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+
+        # 验证旧密码
+        if not pwd_context.verify(payload.oldPassword, user["password"]):
+            raise HTTPException(status_code=400, detail="当前密码输入错误")
+
+        # 加密新密码
+        hashed_password = pwd_context.hash(payload.newPassword)
+        conn.execute("UPDATE users SET password = ? WHERE id = ?", (hashed_password, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"[/api/users/change-password] Password changed for user: {user_id}")
+    return {"success": True, "message": "密码修改成功"}
 
 
 class CreateReviewRequest(BaseModel):
