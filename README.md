@@ -1,119 +1,109 @@
-# Dorm Repair System | 宿舍报修管理系统
+# Dormitory Maintenance System | 智能宿舍报修管理系统
 
-一个基于 **FastAPI + SQLite + React/Vite** 的宿舍报修系统，覆盖学生报修、管理员审批派单、维修员处理、学生评价的完整闭环。
+一个基于 **FastAPI + SQLite + React/Vite** 开发的现代化、智能化宿舍报修系统。该系统不仅覆盖了学生报修、管理员审批派单、维修员处理、学生评价的完整业务闭环，还引入了 **AI 智能派单**、**SLA 履约监控**、**多技能标签调度** 等企业级物业管理系统的高级特性。
 
-> 当前主线是 `backend_fastapi`。`backend` 目录中的 Express/PostgreSQL 版本保留为历史/备用实现，本地演示和后续优化优先使用 FastAPI 版本。
+## ✨ 核心特性 (Features)
 
-## 技术栈
+### 🤖 AI 智能派单系统 (Smart Auto-Dispatch)
+- **多技能标签体系 (Multi-Skills)**：管理员可为维修员配置多个专业技能标签（如水电、家具、网络）。
+- **AI 智能预检**：内置基于 NLP（支持对接 Ollama 本地模型与词法降级引擎）的智能预检系统，自动评估报修分类与优先级。
+- **负载均衡分配 (Load Balancing)**：系统通过算法实时计算对口维修员手中的活跃任务量，智能挑选“最空闲”的师傅进行派单。
+- **防爆单熔断机制**：当符合条件的维修员负荷过高时，AI 自动终止派发，将工单退入池中交由管理员人工介入。
+- **自动化流转感知**：AI 派发成功的工单会在列表中打上显眼的 `🤖 智能派单` 徽章，并在内部备注中记录派发依据，全过程清晰透明。
 
-| 层级 | 技术 |
+### 📊 数据可视化与核心指标监控 (Dashboard)
+- **多维度统计大屏**：内置基于 `Recharts` 的实时统计大屏，呈现维修状态漏斗图与报修类型饼图。
+- **SLA 服务级别协议 (Service Level Agreement)**：根据工单优先级（紧急 2h、高 6h、普通 24h、低 48h）严格计算倒计时，实时动态计算整个系统的 **SLA 达标率**与**平均完成耗时**。
+- **CSV 数据导出**：支持一键导出包含工单完整生命周期数据的 CSV 文件，方便月度汇报与归档复盘。
+- **维修员绩效展示**：独立的维修员表现统计面板（接单量、完成量、被拒量）。
+
+### 💬 现代化的协作与沟通机制
+- **时间轴留言系统 (Comments Timeline)**：在工单详情页引入了沟通记录模块，学生与维修员、管理员可实时文字沟通，补充现场情况。
+- **全局消息通知 (Notifications)**：右上角的小铃铛🔔实时推送业务流转信息（如：维修分配提醒、工单被拒提醒、新留言提醒等），支持“标记已读”及“一键全读”。
+- **富文本公告轮播 (Announcements)**：首页置顶滚动公告栏，支持管理员动态发布断电、停水等全校通知。
+
+### 🛠️ 完善的工单生命周期管理
+- **状态流转引擎**：`待处理(pending) -> 已审核(approved) -> 维修中(in_progress) -> 待评价(pending_evaluation) -> 已结案(closed)`。支持驳回/取消机制。
+- **强制工作流记录**：设定系统围栏，维修员在点击“完成维修”时必须输入包含细节的维修记录（大于5个字），确保履历完整。
+- **五星评价闭环**：工单完成后，学生强制要求进行满意度星级打分与文字反馈，计入系统统计总评。
+- **图片附件支持**：提供基于本地文件系统的图片上传与托管接口，便于保留现场证据。
+
+## 💻 技术栈
+
+| 层级 | 技术与库 |
 | --- | --- |
-| 前端 | React 18、TypeScript、Vite、Tailwind CSS、React Router、Sonner、Lucide |
-| 后端 | FastAPI、Uvicorn、Pydantic、python-jose、passlib |
-| 数据库 | SQLite，本地文件默认位于 `backend_fastapi/dorm.db` |
-| 鉴权 | JWT Bearer Token，角色包含 `student`、`technician`、`admin` |
+| **前端 (Frontend)** | React 18, TypeScript, Vite, Tailwind CSS, React Router DOM |
+| **前端生态** | Recharts (图表), Lucide React (图标), Sonner (Toast组件) |
+| **后端 (Backend)** | FastAPI, Uvicorn, Pydantic, python-jose (JWT), passlib |
+| **数据库 (DB)** | SQLite (轻量无依赖，本地化存储文件) |
 
-## 核心流程
+## 🚀 快速启动
 
-1. 学生注册/登录后提交报修申请。
-2. 管理员查看全部工单，审核、拒绝或分配维修员。
-3. 维修员只能看到分配给自己的任务，并更新为维修中或完成。
-4. 维修完成后工单进入待评价，学生提交评分和反馈。
-5. 评价后工单结案，统计面板展示实时数据。
+本系统力求极简的运行环境要求，无须配置复杂的中间件。
 
-状态流转：
+### 1. 启动命令
 
-```text
-pending -> approved -> in_progress -> pending_evaluation -> closed
-pending -> rejected
-```
-
-## 快速启动
-
-### Windows
-
+**Windows:**
 ```bat
 dev_win.bat
 ```
 
-### macOS / Linux
-
+**macOS / Linux:**
 ```bash
 chmod +x dev_mac.sh
 ./dev_mac.sh
 ```
 
-### npm 脚本
-
+**或者使用 NPM 脚本手动启动:**
 ```bash
+# 首次运行安装所有依赖
 npm run install:all
+# 启动前端和后端
 npm run dev
 ```
 
-启动后访问：
+### 2. 访问地址
 
-| 服务 | 地址 |
+| 服务 | 本地访问地址 |
 | --- | --- |
-| 前端 | http://localhost:5173 |
-| FastAPI 文档 | http://127.0.0.1:8000/docs |
+| **前端 Web** | http://localhost:5173 |
+| **FastAPI Swagger 文档** | http://127.0.0.1:8000/docs |
 
-## 环境变量
+## 🔑 角色与权限体系
 
-复制 `.env.example` 为 `.env` 后按需修改：
+系统采用了基于 JWT 的安全鉴权机制，所有受保护接口强制验证请求头 `Authorization: Bearer <token>`。内置三种标准角色：
 
-```env
-JWT_SECRET=dorm-repair-secret-key-change-in-production
-TOKEN_EXPIRE_MINUTES=1440
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-# DB_PATH=backend_fastapi/dorm.db
-# VITE_API_BASE_URL=http://127.0.0.1:8000
-```
+1. **学生 (student)**：仅可提交本人报修单，跟进进度，对本人完成的工单进行评价打分。
+2. **维修员 (technician)**：系统智能或人工分配到的执行者。可接单、填写维修记录完工，可查看个人的履约统计。具有特定的“技能标签”（Skills）。
+3. **管理员 (admin)**：全知全能的调度中心。可总览大盘数据统计，干预所有工单，发布全局公告，管理用户账号及修改维修人员的专业技能。
 
-开发模式下，前端通过 Vite proxy 将 `/api` 转发到 `http://127.0.0.1:8000`，通常不需要设置 `VITE_API_BASE_URL`。
+## 🗄️ 数据库架构设计 (Schema)
 
-## API 概览
+默认数据库存储在 `backend_fastapi/dorm.db` 中。主要包含了以下表结构：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/register` | 注册用户 |
-| `POST` | `/api/login` | 登录并返回 JWT |
-| `GET` | `/api/users/me` | 获取当前用户 |
-| `GET` | `/api/repairs` | 按角色获取工单列表 |
-| `POST` | `/api/repairs` | 学生提交报修 |
-| `PATCH` | `/api/repairs/{id}/status` | 管理员/维修员更新工单 |
-| `POST` | `/api/repairs/{id}/evaluate` | 学生评价并结案 |
-| `GET` | `/api/stats` | 获取统计数据 |
-| `GET` | `/api/users` | 管理员获取用户列表 |
-| `GET` | `/api/users/technicians` | 管理员获取维修员列表 |
-| `DELETE` | `/api/users/{id}` | 管理员删除用户 |
+- **users**: 用户总表，包含角色划分、联系方式及维修员专属的 `skills`（多技能标签）。
+- **repairs**: 报修工单核心表，冗余存储了 AI 智能推荐的分类/优先级、SLA 到期时间（`slaDueDate`）、最终处理评价及管理员内部备注（`adminNote`）。
+- **reviews**: 独立的服务评价体系表，记录学生提交的分数与评价内容。
+- **comments**: 工单详情页内部的时间轴留言沟通记录。
+- **notifications**: 用于支撑小铃铛业务的全站信/通知消息流转记录。
+- **announcements**: 系统首页展示的管理员公告数据。
 
-受保护接口需要请求头：
+## 🔧 开发与部署说明
 
-```http
-Authorization: Bearer <token>
-```
+1. 根目录的 `.env.example` 可以复制为 `.env` 修改密钥与端口配置。
+2. 开发模式下，前端 Vite 代理已将 `/api` 和 `/uploads` 自动转发到后端的 `http://127.0.0.1:8000`，彻底解决了跨域与静态文件访问问题。
+3. `backend` 目录中保留的 Express/PostgreSQL 版本为早期历史实现，目前的架构演进、新功能迭代（包括 AI 派单机制）均建立在 `backend_fastapi` 目录下。
 
-## 数据表
+## 📜 常用命令参考
 
-| 表 | 说明 |
-| --- | --- |
-| `users` | 用户、角色、联系方式、宿舍信息 |
-| `repairs` | 报修工单、状态、派单、维修记录、评价字段 |
-| `reviews` | 服务评价记录，保留兼容独立评价查询 |
-
-## 工程说明
-
-- `frontend` 是 React/Vite 单页应用。
-- `backend_fastapi` 是当前主线后端。
-- `backend` 是 Express/PostgreSQL 历史实现，暂不作为默认启动路径。
-- `vercel.json` 仍指向旧的 Express 部署入口，当前仅保留为后续部署专项的参考，不建议直接用于本轮 FastAPI 演示部署。
-
-## 常用检查
-
+如果需要单独操作：
 ```bash
-cd frontend
-npm run typecheck
-npm run build
+# 前端类型检查
+cd frontend && npm run typecheck
+
+# 前端构建
+cd frontend && npm run build
 ```
 
-后端可通过 `http://127.0.0.1:8000/docs` 使用 Swagger UI 做接口冒烟测试。
+---
+*本项目作为一个现代化的全栈系统实践，深度融入了物业设施管理 (Facility Management) 相关的商业逻辑（SLA、路由分单、评价监控），非常适合作为高校课程设计、全栈入门与进阶项目的参考范本。*
