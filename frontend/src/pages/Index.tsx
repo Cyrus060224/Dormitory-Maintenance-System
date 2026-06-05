@@ -14,8 +14,12 @@ import Pagination from '../components/custom/Pagination';
 import {
   ResponsiveContainer,
   PieChart, Pie, Cell, Tooltip, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  LineChart, Line
 } from 'recharts';
+import NotificationsMenu from '../components/custom/NotificationsMenu';
+import AnnouncementsBanner from '../components/custom/AnnouncementsBanner';
+import RepairComments from '../components/custom/RepairComments';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
@@ -421,6 +425,7 @@ function StudentView({ token }: { token: string | null }) {
               )}
             </div>
           )}
+          <RepairComments repairId={selected.id} token={token} />
         </div>
       </div>
     );
@@ -520,6 +525,7 @@ function TechnicianView({ token }: { token: string | null }) {
   const [selected, setSelected] = useState<RepairRequest | null>(null);
   const [workNote, setWorkNote] = useState('');
   const [updating, setUpdating] = useState(false);
+  const [tab, setTab] = useState<'tasks' | 'stats'>('tasks');
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -535,11 +541,15 @@ function TechnicianView({ token }: { token: string | null }) {
   useEffect(() => { loadTasks(); }, [loadTasks]);
 
   async function updateTask(taskId: string, status: string) {
+    if (status === 'completed' && (!workNote || workNote.trim().length < 5)) {
+      toast.error('完成维修时必须填写至少5个字的维修记录');
+      return;
+    }
     setUpdating(true);
     try {
       const res = await authFetch(API.REPAIRS.UPDATE_STATUS(taskId), token, {
         method: 'PATCH',
-        body: JSON.stringify({ status, adminNote: workNote || undefined }),
+        body: JSON.stringify({ status, workNote: workNote || undefined }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
@@ -558,29 +568,46 @@ function TechnicianView({ token }: { token: string | null }) {
   const inProgress = tasks.filter(t => t.status === 'in_progress');
   const completed = tasks.filter(t => t.status === 'completed' || t.status === 'pending_evaluation' || t.status === 'closed');
 
+  const ratedTasks = completed.filter(t => t.rating && t.rating > 0);
+  const avgRating = ratedTasks.length > 0 ? (ratedTasks.reduce((acc, t) => acc + (t.rating || 0), 0) / ratedTasks.length).toFixed(1) : '暂无';
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-foreground">我的维修任务</h2>
-        <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
-          <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { label: '待处理', count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
-          { label: '进行中', count: inProgress.length, color: 'bg-purple-50 text-purple-700', icon: Wrench },
-          { label: '已完成', count: completed.length, color: 'bg-green-50 text-green-700', icon: CheckCircle },
-        ].map(({ label, count, color, icon: Icon }) => (
-          <div key={label} className={`rounded-2xl p-4 ${color} flex flex-col items-center`}>
-            <Icon className="w-5 h-5 mb-1" />
-            <span className="text-2xl font-bold">{count}</span>
-            <span className="text-xs font-medium">{label}</span>
-          </div>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6">
+        {([['tasks', '任务列表', Wrench], ['stats', '我的绩效', BarChart2]] as const).map(([key, label, Icon]) => (
+          <button key={key} onClick={() => setTab(key as 'tasks' | 'stats')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition ${
+              tab === key ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            }`}>
+            <Icon className="w-4 h-4" />
+            <span className="hidden sm:inline">{label}</span>
+          </button>
         ))}
       </div>
+
+      {tab === 'tasks' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-foreground">任务列表</h3>
+            <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+              <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          {/* Stats Summary */}
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            {[
+              { label: '待处理', count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
+              { label: '进行中', count: inProgress.length, color: 'bg-purple-50 text-purple-700', icon: Wrench },
+              { label: '已完成', count: completed.length, color: 'bg-green-50 text-green-700', icon: CheckCircle },
+            ].map(({ label, count, color, icon: Icon }) => (
+              <div key={label} className={`rounded-2xl p-4 ${color} flex flex-col items-center`}>
+                <Icon className="w-5 h-5 mb-1" />
+                <span className="text-2xl font-bold">{count}</span>
+                <span className="text-xs font-medium">{label}</span>
+              </div>
+            ))}
+          </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -641,38 +668,90 @@ function TechnicianView({ token }: { token: string | null }) {
                   )}
                 </div>
               )}
-              {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  {selected?.id === t.id ? (
-                    <div className="space-y-3">
-                      <textarea value={workNote} onChange={(e) => setWorkNote(e.target.value)}
-                        rows={2} placeholder="填写维修记录（可选）"
-                        className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm resize-none" />
-                      <div className="flex gap-2">
-                        <button onClick={() => { setSelected(null); setWorkNote(''); }}
-                          className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
-                        {(t.status === 'pending' || t.status === 'approved') && (
-                          <button onClick={() => updateTask(t.id, 'in_progress')} disabled={updating}
-                            className="flex-1 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                            {updating ? '...' : '开始维修'}
+              <div className="mt-3 pt-3 border-t border-border">
+                {selected?.id === t.id ? (
+                  <div className="space-y-3">
+                    {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' && (
+                      <>
+                        <textarea value={workNote} onChange={(e) => setWorkNote(e.target.value)}
+                          rows={2} placeholder="填写维修记录（必填，至少5个字）"
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm resize-none" />
+                        <div className="flex gap-2">
+                          <button onClick={() => { setSelected(null); setWorkNote(''); }}
+                            className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
+                          {(t.status === 'pending' || t.status === 'approved') && (
+                            <button onClick={() => updateTask(t.id, 'in_progress')} disabled={updating}
+                              className="flex-1 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
+                              {updating ? '...' : '开始维修'}
+                            </button>
+                          )}
+                          <button onClick={() => updateTask(t.id, 'completed')} disabled={updating}
+                            className="flex-1 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
+                            {updating ? '...' : '完成维修'}
                           </button>
-                        )}
-                        <button onClick={() => updateTask(t.id, 'completed')} disabled={updating}
-                          className="flex-1 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                          {updating ? '...' : '完成维修'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={() => setSelected(t)}
-                      className="w-full py-2 rounded-xl border border-primary text-primary text-sm font-medium hover:bg-primary/5 transition">
-                      更新状态
+                        </div>
+                      </>
+                    )}
+                    <RepairComments repairId={t.id} token={token} />
+                    <button onClick={() => { setSelected(null); setWorkNote(''); }}
+                      className="w-full py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition mt-2">
+                      收起
                     </button>
-                  )}
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <button onClick={() => setSelected(t)}
+                    className="w-full py-2 rounded-xl border border-primary text-primary text-sm font-medium hover:bg-primary/5 transition">
+                    {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' ? '更新状态 / 讨论' : '查看讨论'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
+        </div>
+      )}
+        </>
+      )}
+
+      {tab === 'stats' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
+            <h3 className="text-lg font-bold text-foreground mb-6">绩效概览</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-blue-50 text-blue-700 rounded-2xl p-4 flex flex-col">
+                <span className="text-xs font-medium mb-1">总任务数</span>
+                <span className="text-3xl font-bold">{tasks.length}</span>
+              </div>
+              <div className="bg-green-50 text-green-700 rounded-2xl p-4 flex flex-col">
+                <span className="text-xs font-medium mb-1">已完成任务</span>
+                <span className="text-3xl font-bold">{completed.length}</span>
+              </div>
+              <div className="bg-yellow-50 text-yellow-700 rounded-2xl p-4 flex flex-col">
+                <span className="text-xs font-medium mb-1">待处理任务</span>
+                <span className="text-3xl font-bold">{pending.length}</span>
+              </div>
+              <div className="bg-purple-50 text-purple-700 rounded-2xl p-4 flex flex-col">
+                <span className="text-xs font-medium mb-1">进行中任务</span>
+                <span className="text-3xl font-bold">{inProgress.length}</span>
+              </div>
+            </div>
+
+            <div className="bg-muted/30 rounded-2xl p-6 border border-border flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground mb-1">平均服务评分</p>
+                <div className="flex items-end gap-3">
+                  <span className="text-4xl font-extrabold text-foreground">{avgRating}</span>
+                  <span className="text-sm text-muted-foreground mb-1.5">/ 5.0</span>
+                </div>
+              </div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <Star key={s} className={`w-8 h-8 ${avgRating !== '暂无' && s <= Math.round(Number(avgRating)) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}`} />
+                ))}
+              </div>
+            </div>
+            
+            <p className="text-xs text-muted-foreground mt-4 text-center">以上数据根据您分配的维修任务本地计算得出。</p>
+          </div>
         </div>
       )}
     </div>
@@ -688,9 +767,14 @@ function AdminView({ token }: { token: string | null }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<RepairRequest | null>(null);
-  const [assignForm, setAssignForm] = useState({ status: 'approved', assignedTo: '', adminNote: '' });
+  const [assignForm, setAssignForm] = useState({ status: 'approved', assignedTo: '', adminNote: '', priority: 'normal' });
   const [assigning, setAssigning] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
+
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [skillsTarget, setSkillsTarget] = useState<User | null>(null);
+  const [skillsForm, setSkillsForm] = useState<string[]>([]);
+  const [skillsSaving, setSkillsSaving] = useState(false);
 
   // Repairs Pagination State
   const [repairsPage, setRepairsPage] = useState(1);
@@ -759,13 +843,14 @@ function AdminView({ token }: { token: string | null }) {
           status: assignForm.status,
           assignedTo: assignForm.assignedTo || undefined,
           adminNote: assignForm.adminNote || undefined,
+          priority: assignForm.priority || undefined,
         }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
         toast.success('操作成功');
         setSelected(null);
-        setAssignForm({ status: 'approved', assignedTo: '', adminNote: '' });
+        setAssignForm({ status: 'approved', assignedTo: '', adminNote: '', priority: 'normal' });
         loadRepairs();
         loadStats();
       } else {
@@ -785,6 +870,50 @@ function AdminView({ token }: { token: string | null }) {
       if (data.success) { toast.success('用户已删除'); loadUsers(); }
       else toast.error(data.message || await readApiMessage(res, '删除失败'));
     } catch { toast.error('网络错误'); }
+  }
+
+  async function saveSkills() {
+    if (!skillsTarget) return;
+    setSkillsSaving(true);
+    try {
+      const res = await authFetch(API.USERS.UPDATE_SKILLS(skillsTarget.id), token, {
+        method: 'PATCH',
+        body: JSON.stringify({ skills: skillsForm.join(',') }),
+      });
+      const data = await res.json() as ApiResponse<User>;
+      if (data.success) {
+        toast.success('技能已更新');
+        setSkillsModalOpen(false);
+        loadUsers();
+      } else {
+        toast.error(data.message || await readApiMessage(res, '更新技能失败'));
+      }
+    } catch {
+      toast.error('网络错误');
+    } finally {
+      setSkillsSaving(false);
+    }
+  }
+
+  async function exportCSV() {
+    try {
+      const res = await authFetch(API.REPAIRS.EXPORT, token);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `repairs_export_${new Date().getTime()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        toast.error('导出失败，请检查权限');
+      }
+    } catch (e) {
+      toast.error('网络错误，导出失败');
+    }
   }
 
   const filteredRepairs = repairs;
@@ -823,9 +952,14 @@ function AdminView({ token }: { token: string | null }) {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-foreground">报修申请列表</h3>
-            <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
-              <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex gap-2">
+              <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl border border-border hover:bg-muted transition text-sm font-medium flex items-center gap-1.5">
+                导出 CSV
+              </button>
+              <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+                <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
           {/* Filter */}
           <div className="flex gap-2 flex-wrap mb-4">
@@ -858,25 +992,14 @@ function AdminView({ token }: { token: string | null }) {
                         <span className="font-semibold text-foreground">{r.dormBuilding} {r.dormRoom}</span>
                         <Badge label={CATEGORY_LABEL[r.category]} colorClass="bg-gray-100 text-gray-700" />
                         <Badge label={PRIORITY_LABEL[r.priority]} colorClass={PRIORITY_COLOR[r.priority]} />
+                        {r.adminNote?.startsWith('[🤖 AI智能派单]') && (
+                          <Badge label="🤖 智能派单" colorClass="bg-blue-100 text-blue-800 border-blue-200" />
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{r.description}</p>
                       {r.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{r.studentName}</p>}
                       {r.assignedToName && <p className="text-xs text-muted-foreground">维修员：{r.assignedToName}</p>}
-                      {/* AI 智能质检预警 */}
-                      {user?.role === 'admin' && r.status === 'pending' && (r.aiCategory || r.aiPriority) && (r.category !== r.aiCategory || r.priority !== r.aiPriority) && (
-                        <div className="mt-2 p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs flex items-start gap-1.5 animate-pulse">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                          <div>
-                            <span className="font-semibold text-amber-900 block mb-0.5">AI 智能质检审核建议</span>
-                            {r.category !== r.aiCategory && (
-                              <span className="block">• 分类不匹配：学生选择“{CATEGORY_LABEL[r.category] || r.category}”，AI 评估最契合“{CATEGORY_LABEL[r.aiCategory!] || r.aiCategory}”</span>
-                            )}
-                            {r.priority !== r.aiPriority && (
-                              <span className="block">• 优先级不匹配：学生自主选择“{PRIORITY_LABEL[r.priority] || r.priority}”，AI 智能建议设为“{PRIORITY_LABEL[r.aiPriority!] || r.aiPriority}”{r.priority === 'urgent' || r.priority === 'high' ? '（疑似主观评级偏高）' : ''}</span>
-                            )}
-                          </div>
-                        </div>
-                      )}
+
                       <p className="text-xs text-muted-foreground mt-1">{new Date(r.createdAt).toLocaleString('zh-CN')}</p>
                       {/* 评价信息显示 */}
                       {r.rating && r.rating > 0 && (
@@ -893,7 +1016,7 @@ function AdminView({ token }: { token: string | null }) {
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
                       <SlaBadge slaDueDate={r.slaDueDate} status={r.status} />
-                      <button onClick={() => { setSelected(r); setAssignForm({ status: r.status, assignedTo: r.assignedTo || '', adminNote: r.adminNote || '' }); }}
+                      <button onClick={() => { setSelected(r); setAssignForm({ status: r.status, assignedTo: r.assignedTo || '', adminNote: r.adminNote || '', priority: r.priority }); }}
                         className="flex items-center gap-1 text-xs text-primary hover:underline">
                         <Eye className="w-3 h-3" />处理
                       </button>
@@ -933,10 +1056,22 @@ function AdminView({ token }: { token: string | null }) {
                           </select>
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1">管理员备注</label>
-                        <input value={assignForm.adminNote} onChange={(e) => setAssignForm(p => ({ ...p, adminNote: e.target.value }))}
-                          placeholder="可选备注" className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">修改优先级</label>
+                          <select value={assignForm.priority} onChange={(e) => setAssignForm(p => ({ ...p, priority: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+                            <option value="low">低</option>
+                            <option value="normal">普通</option>
+                            <option value="high">高</option>
+                            <option value="urgent">紧急</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">管理员备注</label>
+                          <input value={assignForm.adminNote} onChange={(e) => setAssignForm(p => ({ ...p, adminNote: e.target.value }))}
+                            placeholder="可选备注" className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => setSelected(null)}
@@ -946,6 +1081,7 @@ function AdminView({ token }: { token: string | null }) {
                           {assigning ? '保存中...' : '保存'}
                         </button>
                       </div>
+                      <RepairComments repairId={r.id} token={token} />
                     </form>
                   )}
                 </div>
@@ -964,12 +1100,14 @@ function AdminView({ token }: { token: string | null }) {
       {/* Stats Tab */}
       {tab === 'stats' && stats && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {[
               { label: '总报修数', value: stats.totalRequests, color: 'bg-blue-50 text-blue-700', icon: ClipboardList },
               { label: '待处理', value: stats.pendingRequests, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
               { label: '维修中', value: stats.inProgressRequests, color: 'bg-purple-50 text-purple-700', icon: Wrench },
               { label: '已完成', value: stats.completedRequests, color: 'bg-green-50 text-green-700', icon: CheckCircle },
+              { label: 'SLA达标率', value: stats.slaComplianceRate !== undefined ? `${(stats.slaComplianceRate * 100).toFixed(1)}%` : 'N/A', color: 'bg-emerald-50 text-emerald-700', icon: Shield },
+              { label: '平均完成耗时', value: stats.averageResponseTimeHours !== undefined ? `${stats.averageResponseTimeHours.toFixed(1)}h` : 'N/A', color: 'bg-indigo-50 text-indigo-700', icon: Clock },
             ].map(({ label, value, color, icon: Icon }) => (
               <div key={label} className={`rounded-2xl p-4 ${color}`}>
                 <Icon className="w-5 h-5 mb-2" />
@@ -978,6 +1116,23 @@ function AdminView({ token }: { token: string | null }) {
               </div>
             ))}
           </div>
+
+          {stats.trendData && stats.trendData.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
+              <h4 className="font-semibold text-foreground mb-4">近期报修趋势</h4>
+              <div className="h-[240px] w-full flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={stats.trendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ stroke: '#e5e7eb', strokeWidth: 2 }} contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
+                    <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 柱状图：工单状态分布 */}
@@ -1105,6 +1260,11 @@ function AdminView({ token }: { token: string | null }) {
                       <p className="text-xs text-muted-foreground">{u.email}</p>
                       {u.studentId && <p className="text-xs text-muted-foreground">学号：{u.studentId}</p>}
                       {u.dormRoom && <p className="text-xs text-muted-foreground">宿舍：{u.dormRoom}</p>}
+                      {u.role === 'technician' && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          技能：{u.skills ? u.skills.split(',').map(s => CATEGORY_LABEL[s] || s).join(', ') : '未配置'}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
@@ -1112,8 +1272,14 @@ function AdminView({ token }: { token: string | null }) {
                       label={u.role === 'student' ? '学生' : u.role === 'technician' ? '维修员' : '管理员'}
                       colorClass={u.role === 'admin' ? 'bg-purple-100 text-purple-700' : u.role === 'technician' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}
                     />
-                    <button onClick={() => deleteUser(u.id)}
-                      className="text-xs text-red-500 hover:text-red-700 hover:underline">删除</button>
+                    <div className="flex items-center gap-2 mt-1">
+                      {u.role === 'technician' && (
+                        <button onClick={() => { setSkillsTarget(u); setSkillsForm(u.skills ? u.skills.split(',') : []); setSkillsModalOpen(true); }}
+                          className="text-xs text-primary hover:underline">编辑技能</button>
+                      )}
+                      <button onClick={() => deleteUser(u.id)}
+                        className="text-xs text-red-500 hover:text-red-700 hover:underline">删除</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1127,6 +1293,41 @@ function AdminView({ token }: { token: string | null }) {
           </div>
         </div>
       )}
+
+      {/* Skills Modal */}
+      {skillsModalOpen && skillsTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="font-semibold text-foreground">编辑技能标签 - {skillsTarget.name}</h3>
+              <button onClick={() => setSkillsModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {['water', 'electricity', 'furniture', 'network', 'other'].map(cat => (
+                <label key={cat} className="flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer hover:bg-muted/50 transition">
+                  <input type="checkbox" className="w-4 h-4 rounded text-primary focus:ring-primary/50" 
+                    checked={skillsForm.includes(cat)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSkillsForm(prev => [...prev, cat]);
+                      else setSkillsForm(prev => prev.filter(s => s !== cat));
+                    }}
+                  />
+                  <span className="text-sm font-medium">{CATEGORY_LABEL[cat] || cat}</span>
+                </label>
+              ))}
+            </div>
+            <div className="p-4 border-t border-border flex gap-3">
+              <button onClick={() => setSkillsModalOpen(false)} className="flex-1 py-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition">取消</button>
+              <button onClick={saveSkills} disabled={skillsSaving} className="flex-1 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50">
+                {skillsSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1202,6 +1403,7 @@ export default function Index() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationsMenu token={token} />
             <div 
               onClick={() => setIsSettingsOpen(true)}
               className="hidden sm:flex items-center gap-2 cursor-pointer hover:bg-muted p-1.5 rounded-xl transition duration-200 active:scale-95 select-none"
@@ -1226,6 +1428,7 @@ export default function Index() {
 
       {/* Main content */}
       <main className="max-w-5xl mx-auto px-4 py-6">
+        <AnnouncementsBanner token={token} role={displayProfile.role} />
         {/* Welcome banner */}
         <div className="bg-gradient-to-r from-primary to-blue-600 rounded-2xl p-5 mb-6 text-white shadow-md">
           <div className="flex items-center justify-between">

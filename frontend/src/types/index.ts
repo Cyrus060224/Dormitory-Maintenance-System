@@ -6,6 +6,7 @@ export interface User {
   studentId?: string;
   dormRoom?: string;
   phone?: string;
+  skills?: string;
   createdAt?: string;
   activeTasksCount?: number;
 }
@@ -29,6 +30,7 @@ export interface RepairRequest {
   assignedToName?: string;
   rating?: number;
   feedbackTags?: string;
+  feedbackText?: string;
   slaDueDate?: string;
   slaBreached?: number;
   aiCategory?: 'water' | 'electricity' | 'furniture' | 'network' | 'other';
@@ -76,6 +78,39 @@ export interface Stats {
   categoryStats: { category: string; count: number }[];
   avgRating: string;
   reviewCount: number;
+  trendData?: { date: string; count: number }[];
+  slaComplianceRate?: number;
+  averageResponseTimeHours?: number;
+}
+
+export interface Comment {
+  id: string;
+  repairId: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  userName?: string;
+  userRole?: string;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: string;
+  relatedId?: string;
+  isRead: number;
+  createdAt: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  authorId: string;
+  createdAt: string;
+  authorName?: string;
 }
 
 export interface ApiResponse<T> {

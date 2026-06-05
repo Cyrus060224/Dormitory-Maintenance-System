@@ -106,6 +106,7 @@ def init_db():
             studentId TEXT,
             dormRoom TEXT,
             phone TEXT,
+            skills TEXT,
             createdAt TEXT NOT NULL
         )
     """)
@@ -144,6 +145,36 @@ def init_db():
             createdAt TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id TEXT PRIMARY KEY,
+            repairId TEXT NOT NULL,
+            userId TEXT NOT NULL,
+            content TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            type TEXT NOT NULL,
+            relatedId TEXT,
+            isRead INTEGER DEFAULT 0,
+            createdAt TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS announcements (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            authorId TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+        )
+    """)
 
     # 数据库迁移：为已有数据库添加新字段
     migration_add_columns(conn)
@@ -155,6 +186,11 @@ def init_db():
 def migration_add_columns(conn: sqlite3.Connection):
     """为已有数据库添加评价及SLA相关字段（SQLite 不支持直接 ADD COLUMN IF NOT EXISTS）"""
     try:
+        # Check users table
+        user_columns = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if 'skills' not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN skills TEXT")
+
         # 检查 rating 字段是否存在
         columns = [row[1] for row in conn.execute("PRAGMA table_info(repairs)").fetchall()]
         if 'rating' not in columns:
@@ -173,6 +209,37 @@ def migration_add_columns(conn: sqlite3.Connection):
             conn.execute("ALTER TABLE repairs ADD COLUMN aiCategory TEXT")
         if 'aiPriority' not in columns:
             conn.execute("ALTER TABLE repairs ADD COLUMN aiPriority TEXT")
+            
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS comments (
+                id TEXT PRIMARY KEY,
+                repairId TEXT NOT NULL,
+                userId TEXT NOT NULL,
+                content TEXT NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                userId TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                type TEXT NOT NULL,
+                relatedId TEXT,
+                isRead INTEGER DEFAULT 0,
+                createdAt TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS announcements (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                authorId TEXT NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+        """)
     except Exception as e:
         print(f"[Migration] Error: {e}")
 
@@ -232,6 +299,7 @@ class UpdateRepairStatus(BaseModel):
     assignedTo: Optional[str] = None
     adminNote: Optional[str] = None
     workNote: Optional[str] = None
+    priority: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -249,6 +317,20 @@ class ChangePasswordRequest(BaseModel):
 
 class AnalyzeRepairRequest(BaseModel):
     description: str
+
+
+class CreateCommentRequest(BaseModel):
+    content: str
+
+
+class CreateAnnouncementRequest(BaseModel):
+    title: str
+    content: str
+
+
+class UpdateSkillsRequest(BaseModel):
+    skills: str
+
 
 
 # ─── Auth Endpoints ─────────────────────────────────────────────────────────────
@@ -319,8 +401,23 @@ async def login(payload: LoginRequest):
             "studentId": user["studentId"],
             "dormRoom": user["dormRoom"],
             "phone": user["phone"],
+            "skills": user["skills"] if "skills" in user.keys() else None,
         },
     }
+
+@app.patch("/api/users/{user_id}/skills")
+async def update_user_skills(user_id: str, payload: UpdateSkillsRequest, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        
+        conn.execute("UPDATE users SET skills = ? WHERE id = ?", (payload.skills, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "技能更新成功"}
 
 # ─── Repair Endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/repairs")
@@ -537,13 +634,43 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
 
     conn = get_db()
     try:
+        assigned_to = None
+        status = "pending"
+        admin_note = None
+        
+        techs = conn.execute("SELECT id, name, skills FROM users WHERE role = 'technician'").fetchall()
+        matching_techs = [t for t in techs if t['skills'] and payload.category in t['skills']]
+        
+        if matching_techs:
+            min_tasks = float('inf')
+            best_tech = None
+            for tech in matching_techs:
+                tech_id = tech['id']
+                tasks = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status IN ('pending', 'approved', 'in_progress')", (tech_id,)).fetchone()[0]
+                if tasks < min_tasks:
+                    min_tasks = tasks
+                    best_tech = tech
+                    
+            if best_tech and min_tasks < 5:
+                assigned_to = best_tech['id']
+                status = "approved"
+                tech_name = best_tech['name']
+                admin_note = f"[🤖 AI智能派单] 根据技能匹配与空闲度（当前负载 {min_tasks} 单），自动分配给：{tech_name}"
+
         conn.execute(
             """INSERT INTO repairs 
                (id, studentId, dormBuilding, dormRoom, category, description, imageUrl, status, priority, assignedTo, adminNote, slaDueDate, slaBreached, aiCategory, aiPriority, createdAt, updatedAt) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (repair_id, user_id, payload.dormBuilding, payload.dormRoom, payload.category,
-             payload.description, payload.imageUrl, "pending", payload.priority, None, None, sla_due_date, 0, ai_cat, ai_pri, now, now),
+             payload.description, payload.imageUrl, status, payload.priority, assigned_to, admin_note, sla_due_date, 0, ai_cat, ai_pri, now, now),
         )
+        
+        if assigned_to:
+            conn.execute(
+                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), assigned_to, "新报修任务分配", "您有一个新的报修任务被自动分配", "repair_assigned", repair_id, 0, now)
+            )
+
         conn.commit()
 
         row = conn.execute("""
@@ -581,8 +708,10 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
                 raise HTTPException(status_code=403, detail="只能更新自己分配到的任务")
             if payload.status not in ("in_progress", "completed"):
                 raise HTTPException(status_code=400, detail="维修人员只能将状态更新为维修中或已完成")
-            # 维修员提交完成时，状态自动变为 pending_evaluation（待学生评价）
+            # 维修员提交完成时，强制填写维修记录，且状态自动变为 pending_evaluation
             if payload.status == "completed":
+                if not payload.workNote or len(payload.workNote.strip()) < 5:
+                    raise HTTPException(status_code=400, detail="完成维修时必须填写至少5个字的维修记录(workNote)")
                 payload.status = "pending_evaluation"
 
         # Admin validations
@@ -625,6 +754,17 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
             if payload.adminNote is not None:
                 updates.append("adminNote = ?")
                 values.append(payload.adminNote)
+            if payload.priority is not None:
+                if payload.priority not in ("low", "normal", "high", "urgent"):
+                    raise HTTPException(status_code=400, detail="优先级无效")
+                updates.append("priority = ?")
+                values.append(payload.priority)
+                # 重新计算 SLA 截止时间（基于当前时间）
+                sla_hours = {"urgent": 2, "high": 6, "normal": 24, "low": 48}
+                hours = sla_hours.get(payload.priority, 24)
+                new_sla = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                updates.append("slaDueDate = ?")
+                values.append(new_sla)
 
         updates.append("updatedAt = ?")
         values.append(now)
@@ -642,6 +782,22 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
             LEFT JOIN users t ON r.assignedTo = t.id
             WHERE r.id = ?
         """, (repair_id,)).fetchone()
+
+        # Add notifications for status change or assignment
+        now_time = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        if payload.status is not None and payload.status != existing["status"]:
+            conn.execute(
+                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), existing["studentId"], "报修状态已更新", f"您的报修申请状态已更新为: {STATUS_LABELS.get(payload.status, payload.status)}", "repair_status", repair_id, 0, now_time)
+            )
+        
+        if payload.assignedTo and payload.assignedTo != existing["assignedTo"]:
+            conn.execute(
+                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), payload.assignedTo, "新报修任务分配", "您有一个新的报修任务被分配", "repair_assigned", repair_id, 0, now_time)
+            )
+            
+        conn.commit()
     finally:
         conn.close()
 
@@ -693,6 +849,47 @@ async def get_stats(current_user: dict = Depends(verify_token)):
 
     category_stats = [{"category": r["category"], "count": r["count"]} for r in category_rows]
 
+    # Additional metrics calculation
+    try:
+        conn = get_db()
+        # Trend data (last 7 days repairs count)
+        trend_query = """
+            SELECT date(createdAt) as date, COUNT(*) as count 
+            FROM repairs 
+            WHERE createdAt >= date('now', '-7 days')
+            GROUP BY date(createdAt)
+            ORDER BY date(createdAt) ASC
+        """
+        trend_rows = conn.execute(trend_query).fetchall()
+        trend_data = [{"date": r["date"], "count": r["count"]} for r in trend_rows]
+
+        # SLA compliance rate (Dynamic calculation)
+        total_repairs = conn.execute("SELECT COUNT(*) FROM repairs").fetchone()[0]
+        breached_query = """
+            SELECT COUNT(*) FROM repairs 
+            WHERE (status IN ('pending', 'approved', 'in_progress') AND slaDueDate < ?)
+               OR (status IN ('completed', 'pending_evaluation', 'closed') AND updatedAt > slaDueDate)
+        """
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        breached_repairs = conn.execute(breached_query, (now_str,)).fetchone()[0]
+        sla_compliance_rate = 1.0
+        if total_repairs > 0:
+            sla_compliance_rate = (total_repairs - breached_repairs) / total_repairs
+
+        # Average response time (time from creation to in_progress or completed) for completed/in_progress repairs
+        # Just an approximation: we check the time difference if possible. Actually, we don't track first response time.
+        # We can simulate this or leave it as a placeholder. We will provide a dummy average response time for now, or calculate based on updatedAt for completed.
+        # Let's compute average duration from createdAt to updatedAt for completed repairs.
+        avg_response_query = """
+            SELECT AVG(julianday(updatedAt) - julianday(createdAt)) * 24 as avg_hours 
+            FROM repairs 
+            WHERE status IN ('completed', 'closed', 'pending_evaluation')
+        """
+        avg_resp_row = conn.execute(avg_response_query).fetchone()
+        avg_response_time = avg_resp_row["avg_hours"] if avg_resp_row and avg_resp_row["avg_hours"] else 0
+    finally:
+        conn.close()
+
     return {
         "success": True,
         "data": {
@@ -707,6 +904,9 @@ async def get_stats(current_user: dict = Depends(verify_token)):
             "categoryStats": category_stats,
             "avgRating": f"{avg_rating_row or 0:.1f}",
             "reviewCount": reviews,
+            "trendData": trend_data,
+            "slaComplianceRate": float(f"{sla_compliance_rate:.4f}"),
+            "averageResponseTimeHours": float(f"{avg_response_time:.2f}"),
         },
     }
 
@@ -994,3 +1194,199 @@ async def create_review(payload: CreateReviewRequest, current_user: dict = Depen
 
     print(f"[/api/reviews] Review created: {review_id} by {current_user.get('name')}")
     return {"success": True, "data": {"id": review_id}}
+
+
+# ─── Comments Endpoints ───────────────────────────────────────────────────────────
+@app.get("/api/repairs/{repair_id}/comments")
+async def get_repair_comments(repair_id: str, current_user: dict = Depends(verify_token)):
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT c.*, u.name as userName, u.role as userRole
+            FROM comments c
+            LEFT JOIN users u ON c.userId = u.id
+            WHERE c.repairId = ?
+            ORDER BY c.createdAt ASC
+        """, (repair_id,)).fetchall()
+    finally:
+        conn.close()
+    return {"success": True, "data": [dict(r) for r in rows]}
+
+
+@app.post("/api/repairs/{repair_id}/comments")
+async def add_repair_comment(repair_id: str, payload: CreateCommentRequest, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    try:
+        repair = conn.execute("SELECT * FROM repairs WHERE id = ?", (repair_id,)).fetchone()
+        if not repair:
+            raise HTTPException(status_code=404, detail="报修记录不存在")
+
+        comment_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+        conn.execute(
+            "INSERT INTO comments (id, repairId, userId, content, createdAt) VALUES (?, ?, ?, ?, ?)",
+            (comment_id, repair_id, user_id, payload.content, now)
+        )
+        
+        # Determine who should be notified
+        # If student comments, notify assigned tech and maybe admin
+        # If tech comments, notify student
+        if current_user.get("role") == "student" and repair["assignedTo"]:
+            conn.execute(
+                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), repair["assignedTo"], "新评论", f"您的工单有新的评论", "new_comment", repair_id, 0, now)
+            )
+        elif current_user.get("role") in ["technician", "admin"]:
+            conn.execute(
+                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), repair["studentId"], "新回复", f"您的工单收到了新的回复", "new_comment", repair_id, 0, now)
+            )
+            
+        conn.commit()
+
+        row = conn.execute("""
+            SELECT c.*, u.name as userName, u.role as userRole
+            FROM comments c
+            LEFT JOIN users u ON c.userId = u.id
+            WHERE c.id = ?
+        """, (comment_id,)).fetchone()
+    finally:
+        conn.close()
+    return {"success": True, "data": dict(row)}
+
+
+# ─── Notifications Endpoints ──────────────────────────────────────────────────────
+@app.get("/api/notifications")
+async def get_notifications(current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT * FROM notifications 
+            WHERE userId = ? 
+            ORDER BY createdAt DESC
+        """, (user_id,)).fetchall()
+    finally:
+        conn.close()
+    return {"success": True, "data": [dict(r) for r in rows]}
+
+
+@app.patch("/api/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    try:
+        conn.execute("UPDATE notifications SET isRead = 1 WHERE id = ? AND userId = ?", (notification_id, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "已标记为已读"}
+
+
+@app.post("/api/notifications/read-all")
+async def mark_all_notifications_read(current_user: dict = Depends(verify_token)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    try:
+        conn.execute("UPDATE notifications SET isRead = 1 WHERE userId = ? AND isRead = 0", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "已全部标记为已读"}
+
+
+# ─── Announcements Endpoints ──────────────────────────────────────────────────────
+@app.get("/api/announcements")
+async def get_announcements():
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT a.*, u.name as authorName 
+            FROM announcements a
+            LEFT JOIN users u ON a.authorId = u.id
+            ORDER BY a.createdAt DESC
+        """).fetchall()
+    finally:
+        conn.close()
+    return {"success": True, "data": [dict(r) for r in rows]}
+
+
+@app.post("/api/announcements")
+async def create_announcement(payload: CreateAnnouncementRequest, current_user: dict = Depends(require_admin)):
+    user_id = current_user.get("userId", "")
+    conn = get_db()
+    try:
+        announcement_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        conn.execute(
+            "INSERT INTO announcements (id, title, content, authorId, createdAt) VALUES (?, ?, ?, ?, ?)",
+            (announcement_id, payload.title, payload.content, user_id, now)
+        )
+        conn.commit()
+        row = conn.execute("""
+            SELECT a.*, u.name as authorName 
+            FROM announcements a
+            LEFT JOIN users u ON a.authorId = u.id
+            WHERE a.id = ?
+        """, (announcement_id,)).fetchone()
+    finally:
+        conn.close()
+    return {"success": True, "data": dict(row)}
+
+
+@app.delete("/api/announcements/{announcement_id}")
+async def delete_announcement(announcement_id: str, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "公告已删除"}
+
+
+# ─── Export Endpoint ──────────────────────────────────────────────────────────────
+import csv
+import io
+from fastapi.responses import StreamingResponse
+
+@app.get("/api/repairs/export")
+async def export_repairs(current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT r.id, u.name as studentName, r.dormBuilding, r.dormRoom, 
+                   r.category, r.status, r.priority, t.name as assignedToName, 
+                   r.createdAt, r.updatedAt
+            FROM repairs r
+            LEFT JOIN users u ON r.studentId = u.id
+            LEFT JOIN users t ON r.assignedTo = t.id
+            ORDER BY r.createdAt DESC
+        """).fetchall()
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Repair ID", "Student Name", "Building", "Room", "Category", 
+        "Status", "Priority", "Assigned Technician", "Created At", "Updated At"
+    ])
+    
+    for row in rows:
+        writer.writerow([
+            row["id"], row["studentName"], row["dormBuilding"], row["dormRoom"],
+            row["category"], row["status"], row["priority"], row["assignedToName"],
+            row["createdAt"], row["updatedAt"]
+        ])
+    
+    output.seek(0)
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=repairs_export.csv"}
+    )
+

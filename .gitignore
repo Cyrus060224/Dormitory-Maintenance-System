@@ -10,6 +10,7 @@ backend_fastapi/venv/
 backend_fastapi/.venv/
 backend_fastapi/*.pyc
 backend_fastapi/*.db
+backend_fastapi/uploads/
 
 # 环境变量文件（不要提交敏感信息）
 .env

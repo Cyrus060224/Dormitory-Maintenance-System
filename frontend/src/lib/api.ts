@@ -16,9 +16,21 @@ export const API = {
     UPDATE_STATUS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/status`,
     EVALUATE: (id: string) => `${API_BASE_URL}/api/repairs/${id}/evaluate`,
     ANALYZE: `${API_BASE_URL}/api/repairs/analyze`,
+    EXPORT: `${API_BASE_URL}/api/repairs/export`,
+    COMMENTS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/comments`,
   },
   REVIEWS: {
     CREATE: `${API_BASE_URL}/api/reviews`,
+  },
+  NOTIFICATIONS: {
+    LIST: `${API_BASE_URL}/api/notifications`,
+    MARK_READ: (id: string) => `${API_BASE_URL}/api/notifications/${id}/read`,
+    MARK_ALL_READ: `${API_BASE_URL}/api/notifications/read-all`,
+  },
+  ANNOUNCEMENTS: {
+    LIST: `${API_BASE_URL}/api/announcements`,
+    CREATE: `${API_BASE_URL}/api/announcements`,
+    DELETE: (id: string) => `${API_BASE_URL}/api/announcements/${id}`,
   },
   USERS: {
     LIST: `${API_BASE_URL}/api/users`,
@@ -26,6 +38,7 @@ export const API = {
     UPDATE: (id: string) => `${API_BASE_URL}/api/users/${id}`,
     UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
     CHANGE_PASSWORD: `${API_BASE_URL}/api/users/change-password`,
+    UPDATE_SKILLS: (id: string) => `${API_BASE_URL}/api/users/${id}/skills`,
   },
   STATS: {
     GET: `${API_BASE_URL}/api/stats`,
