@@ -6,6 +6,8 @@ import Login from './components/custom/Login';
 import Signup from './components/custom/Signup';
 import LandingPage from './pages/LandingPage';
 
+import { LanguageProvider } from './contexts/LanguageContext';
+
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
 
@@ -49,8 +51,10 @@ export default function App() {
   return (
     <HashRouter>
       <AuthProvider>
-        <AppRoutes />
-        <Toaster position="top-right" richColors />
+        <LanguageProvider>
+          <AppRoutes />
+          <Toaster position="top-right" richColors />
+        </LanguageProvider>
       </AuthProvider>
     </HashRouter>
   );

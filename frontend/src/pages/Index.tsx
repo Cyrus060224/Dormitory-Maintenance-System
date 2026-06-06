@@ -1,7 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { translations } from '../lib/i18n';
 import { RepairRequest, User, Stats, ApiResponse, PaginatedApiResponse, Part, RepairPart, AIConfig, ChatMessage } from '../types';
 import { toast } from 'sonner';
+
+// ─── i18n Type-safe Helpers ──────────────────────────────────────────────────
+function tCat(cat: string, t: (key: keyof typeof translations.zh) => string): string {
+  return t(`cat_${cat}` as keyof typeof translations.zh);
+}
+function tStatus(status: string, t: (key: keyof typeof translations.zh) => string): string {
+  return t(`status_${status}` as keyof typeof translations.zh);
+}
+function tPriority(priority: string, t: (key: keyof typeof translations.zh) => string): string {
+  return t(`priority_${priority}` as keyof typeof translations.zh);
+}
 
 import {
   Wrench, Home, ClipboardList, BarChart2, Users, LogOut,
@@ -846,6 +859,7 @@ function AdminAIConfigsTab({ token }: { token: string | null }) {
 // ─── Student View ─────────────────────────────────────────────────────────────
 
 function StudentView({ token }: { token: string | null }) {
+  const { language, t } = useLanguage();
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [requests, setRequests] = useState<RepairRequest[]>([]);
   const [selected, setSelected] = useState<RepairRequest | null>(null);
@@ -858,6 +872,9 @@ function StudentView({ token }: { token: string | null }) {
     dormBuilding: '', dormRoom: '', category: 'water',
     description: '', priority: 'normal', imageUrl: '',
   });
+
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiDiagnosisText, setAiDiagnosisText] = useState('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -873,16 +890,16 @@ function StudentView({ token }: { token: string | null }) {
         setRequests(data.data);
         setTotalCount(data.total ?? data.data.length);
       }
-    } catch { toast.error('加载失败'); }
+    } catch { toast.error(language === 'zh' ? '加载失败' : 'Load failed'); }
     finally { setLoading(false); }
-  }, [token, currentPage, pageSize]);
+  }, [token, currentPage, pageSize, language]);
 
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
   async function submitRepair(e: React.FormEvent) {
     e.preventDefault();
     if (!form.dormBuilding || !form.dormRoom || !form.description) {
-      toast.error('请填写所有必填项'); return;
+      toast.error(language === 'zh' ? '请填写所有必填项' : 'Please fill in all required fields'); return;
     }
     setSubmitting(true);
     try {
@@ -899,17 +916,18 @@ function StudentView({ token }: { token: string | null }) {
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
-        toast.success('报修申请提交成功！');
+        toast.success(language === 'zh' ? '报修申请提交成功！' : 'Repair request submitted successfully!');
         setForm({ dormBuilding: '', dormRoom: '', category: 'water', description: '', priority: 'normal', imageUrl: '' });
+        setAiDiagnosisText('');
         setCurrentPage(1);
         setView('list');
         loadRequests();
       } else {
-        toast.error(data.message || await readApiMessage(res, `提交失败 (HTTP ${res.status})`));
+        toast.error(data.message || await readApiMessage(res, language === 'zh' ? `提交失败 (HTTP ${res.status})` : `Submission failed (HTTP ${res.status})`));
       }
     } catch (err) { 
       console.error('Submit repair error:', err);
-      toast.error('网络错误，请稍后重试'); 
+      toast.error(language === 'zh' ? '网络错误，请稍后重试' : 'Network error, please try again later'); 
     }
     finally { setSubmitting(false); }
   }
@@ -929,14 +947,14 @@ function StudentView({ token }: { token: string | null }) {
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
-        toast.success('评价提交成功！感谢您的反馈');
+        toast.success(language === 'zh' ? '评价提交成功！感谢您的反馈' : 'Evaluation submitted! Thank you for your feedback');
         setEvalModalOpen(false);
         setEvalTarget(null);
         loadRequests();
       } else {
-        toast.error(data.message || await readApiMessage(res, '评价提交失败'));
+        toast.error(data.message || await readApiMessage(res, language === 'zh' ? '评价提交失败' : 'Failed to submit evaluation'));
       }
-    } catch { toast.error('网络错误'); }
+    } catch { toast.error(language === 'zh' ? '网络错误' : 'Network error'); }
     finally { setEvalLoading(false); }
   }
 
@@ -944,57 +962,57 @@ function StudentView({ token }: { token: string | null }) {
     return (
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => setView('list')} className="text-muted-foreground hover:text-foreground">
+          <button onClick={() => { setView('list'); setAiDiagnosisText(''); }} className="text-muted-foreground hover:text-foreground">
             <ChevronRight className="w-5 h-5 rotate-180" />
           </button>
-          <h2 className="text-xl font-bold text-foreground">提交报修申请</h2>
+          <h2 className="text-xl font-bold text-foreground">{t('requestRepair')}</h2>
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
           <form onSubmit={submitRepair} className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">宿舍楼 <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-foreground mb-1">{t('dormBuilding')} <span className="text-red-500">*</span></label>
                 <input value={form.dormBuilding} onChange={(e) => setForm(p => ({ ...p, dormBuilding: e.target.value }))}
-                  placeholder="如：A栋、1号楼" className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition" />
+                  placeholder={language === 'zh' ? "如：A栋、1号楼" : "e.g., Bldg A, Bldg 1"} className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">房间号 <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-foreground mb-1">{t('roomNumber')} <span className="text-red-500">*</span></label>
                 <input value={form.dormRoom} onChange={(e) => setForm(p => ({ ...p, dormRoom: e.target.value }))}
-                  placeholder="如：301" className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition" />
+                  placeholder="e.g., 301" className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition" />
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">报修类型</label>
+                <label className="block text-sm font-medium text-foreground mb-1">{t('faultCategory')}</label>
                 <select value={form.category} onChange={(e) => setForm(p => ({ ...p, category: e.target.value }))}
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition">
-                  <option value="water">水管/水电</option>
-                  <option value="electricity">电路/电器</option>
-                  <option value="furniture">家具/设施</option>
-                  <option value="network">网络/通信</option>
-                  <option value="other">其他</option>
+                  <option value="water">{t('cat_water')}</option>
+                  <option value="electricity">{t('cat_electricity')}</option>
+                  <option value="furniture">{t('cat_furniture')}</option>
+                  <option value="network">{t('cat_network')}</option>
+                  <option value="other">{t('cat_other')}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">优先级</label>
+                <label className="block text-sm font-medium text-foreground mb-1">{t('priority')}</label>
                 <select value={form.priority} onChange={(e) => setForm(p => ({ ...p, priority: e.target.value }))}
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition">
-                  <option value="low">低</option>
-                  <option value="normal">普通</option>
-                  <option value="high">高</option>
-                  <option value="urgent">紧急</option>
+                  <option value="low">{t('priority_low')}</option>
+                  <option value="normal">{t('priority_normal')}</option>
+                  <option value="high">{t('priority_high')}</option>
+                  <option value="urgent">{t('priority_urgent')}</option>
                 </select>
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">问题描述 <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-foreground mb-1.5">{t('faultDescription')} <span className="text-red-500">*</span></label>
               <textarea value={form.description} onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))}
-                rows={4} placeholder="请详细描述问题，例如：宿舍卫生间马桶堵塞了，一直在反水，地面积水很严重，人都滑倒了。"
+                rows={4} placeholder={t('describePlaceholder')}
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition resize-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">报修图片（最多5张，可选）</label>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <label className="block text-sm font-medium text-foreground mb-2">{t('uploadPhoto')}</label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-2">
                 {/* 渲染已有图片的缩略图 */}
                 {form.imageUrl ? form.imageUrl.split(',').map((imgUrl, idx) => (
                   <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-border group bg-muted flex items-center justify-center">
@@ -1028,13 +1046,15 @@ function StudentView({ token }: { token: string | null }) {
                         const file = e.target.files?.[0];
                         if (!file) return;
                         if (file.size > 5 * 1024 * 1024) {
-                          toast.error('图片大小不能超过 5MB');
+                          toast.error(t('photoTip') || '图片大小不能超过 5MB');
                           return;
                         }
                         const formData = new FormData();
                         formData.append('file', file);
                         
                         setSubmitting(true);
+                        setAiAnalyzing(true);
+                        setAiDiagnosisText('');
                         try {
                           const res = await authFetch(API.UPLOAD, token, {
                             method: 'POST',
@@ -1045,32 +1065,76 @@ function StudentView({ token }: { token: string | null }) {
                             const currentUrls = form.imageUrl ? form.imageUrl.split(',') : [];
                             currentUrls.push(data.url);
                             setForm(p => ({ ...p, imageUrl: currentUrls.join(',') }));
-                            toast.success('图片上传成功！');
+                            toast.success(language === 'zh' ? '图片上传成功！' : 'Image uploaded successfully!');
+                            
+                            // Trigger AI Vision pre-inspection
+                            try {
+                              const aiFormData = new FormData();
+                              aiFormData.append('file', file);
+                              const aiRes = await authFetch(API.REPAIRS.ANALYZE_IMAGE, token, {
+                                method: 'POST',
+                                body: aiFormData,
+                              });
+                              const aiData = await aiRes.json() as { success: boolean; data?: { category: string; diagnosis: string } };
+                              if (aiData.success && aiData.data) {
+                                setForm(p => ({ ...p, category: aiData.data.category }));
+                                setAiDiagnosisText(aiData.data.diagnosis);
+                                toast.success(language === 'zh' ? '🤖 宿宝 AI 视觉分析推荐分类完成' : '🤖 Subao AI Vision analysis recommended category!');
+                              }
+                            } catch (err) {
+                              console.error('AI vision analysis error:', err);
+                            }
                           } else {
-                            toast.error(data.message || '图片上传失败');
+                            toast.error(data.message || (language === 'zh' ? '图片上传失败' : 'Image upload failed'));
                           }
                         } catch {
-                          toast.error('上传图片时发生网络错误');
+                          toast.error(language === 'zh' ? '上传图片时发生网络错误' : 'Network error during image upload');
                         } finally {
                           setSubmitting(false);
+                          setAiAnalyzing(false);
                         }
                       }}
                     />
                     <Plus className="w-5 h-5 text-muted-foreground mb-1" />
-                    <span className="text-xs text-muted-foreground text-center px-1 font-medium">添加图片</span>
+                    <span className="text-xs text-muted-foreground text-center px-1 font-medium">{language === 'zh' ? '添加图片' : 'Add Image'}</span>
                     <span className="text-[10px] text-muted-foreground/60 text-center">{form.imageUrl ? form.imageUrl.split(',').length : 0}/5</span>
                   </label>
                 )}
               </div>
             </div>
+
+            {/* AI Diagnosis Animation & Result */}
+            {(aiAnalyzing || aiDiagnosisText) && (
+              <div className="p-4 rounded-xl bg-primary/5 border border-primary/10 space-y-2 animate-fadeIn">
+                <div className="flex items-center gap-2 text-primary">
+                  <Sparkles className={`w-4 h-4 ${aiAnalyzing ? 'animate-spin' : 'animate-bounce-subtle'}`} />
+                  <span className="text-xs font-semibold uppercase tracking-wider">
+                    {aiAnalyzing ? t('aiDiagnosis') : (language === 'zh' ? '🤖 宿宝 AI 视觉预检诊断' : '🤖 Subao AI Vision Pre-inspection')}
+                  </span>
+                </div>
+                {aiAnalyzing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span className="text-xs text-muted-foreground">{language === 'zh' ? '宿宝正在读取您的故障图片...' : 'Subao is analyzing your fault image...'}</span>
+                  </div>
+                ) : (
+                  <p className="text-sm text-foreground/90 font-medium leading-relaxed bg-white/50 p-2.5 rounded-lg border border-primary/5">
+                    {aiDiagnosisText}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 pt-2">
-              <button type="button" onClick={() => setView('list')}
+              <button type="button" onClick={() => { setView('list'); setAiDiagnosisText(''); }}
                 className="flex-1 py-3 rounded-xl border border-border text-foreground font-medium hover:bg-muted transition">
-                取消
+                {t('cancel')}
               </button>
               <button type="submit" disabled={submitting}
                 className="flex-1 py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-2">
-                <Send className="w-4 h-4" />{submitting ? '提交中...' : '提交申请'}
+                <Send className="w-4 h-4" />{submitting ? t('loading') : t('submit')}
               </button>
             </div>
           </form>
@@ -1086,27 +1150,27 @@ function StudentView({ token }: { token: string | null }) {
           <button onClick={() => setView('list')} className="text-muted-foreground hover:text-foreground">
             <ChevronRight className="w-5 h-5 rotate-180" />
           </button>
-          <h2 className="text-xl font-bold text-foreground">报修详情</h2>
+          <h2 className="text-xl font-bold text-foreground">{language === 'zh' ? '报修详情' : 'Repair Details'}</h2>
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-border p-6 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-lg font-semibold text-foreground">{selected.dormBuilding} {selected.dormRoom}</p>
-              <p className="text-sm text-muted-foreground mt-0.5">{CATEGORY_LABEL[selected.category]}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">{tCat(selected.category, t)}</p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <Badge label={STATUS_LABEL[selected.status]} colorClass={STATUS_COLOR[selected.status]} />
-              <Badge label={PRIORITY_LABEL[selected.priority]} colorClass={PRIORITY_COLOR[selected.priority]} />
+              <Badge label={tStatus(selected.status, t)} colorClass={STATUS_COLOR[selected.status]} />
+              <Badge label={tPriority(selected.priority, t)} colorClass={PRIORITY_COLOR[selected.priority]} />
               <SlaBadge slaDueDate={selected.slaDueDate} status={selected.status} />
             </div>
           </div>
           <div className="border-t border-border pt-4">
-            <p className="text-sm font-medium text-muted-foreground mb-1">问题描述</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">{t('faultDescription')}</p>
             <p className="text-foreground leading-relaxed">{selected.description}</p>
           </div>
           {selected.imageUrl && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium text-muted-foreground mb-2">报修图片</p>
+              <p className="text-sm font-medium text-muted-foreground mb-2">{language === 'zh' ? '报修图片' : 'Repair Photos'}</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {selected.imageUrl.split(',').map((imgUrl, idx) => (
                   <div key={idx} className="relative aspect-video rounded-xl overflow-hidden border border-border bg-muted flex items-center justify-center cursor-zoom-in">
@@ -1123,24 +1187,24 @@ function StudentView({ token }: { token: string | null }) {
           )}
           {selected.adminNote && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium text-muted-foreground mb-1">管理员备注</p>
+              <p className="text-sm font-medium text-muted-foreground mb-1">{language === 'zh' ? '管理员备注' : 'Admin Note'}</p>
               <p className="text-foreground">{selected.adminNote}</p>
             </div>
           )}
           {selected.assignedToName && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium text-muted-foreground mb-1">维修人员</p>
+              <p className="text-sm font-medium text-muted-foreground mb-1">{language === 'zh' ? '维修人员' : 'Technician'}</p>
               <p className="text-foreground">{selected.assignedToName}</p>
             </div>
           )}
           <div className="border-t border-border pt-4 text-sm text-muted-foreground">
-            提交时间：{new Date(selected.createdAt).toLocaleString('zh-CN')}
+            {language === 'zh' ? '提交时间：' : 'Submitted At: '}{new Date(selected.createdAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US')}
           </div>
 
           {/* 评价信息显示 */}
           {selected.rating && selected.rating > 0 && (
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-semibold text-foreground mb-2">服务评价</p>
+              <p className="text-sm font-semibold text-foreground mb-2">{language === 'zh' ? '服务评价' : 'Service Evaluation'}</p>
               <div className="flex items-center gap-1 mb-2">
                 {[1,2,3,4,5].map((s) => (
                   <Star key={s} className={`w-5 h-5 ${s <= selected.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
@@ -1169,14 +1233,14 @@ function StudentView({ token }: { token: string | null }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-foreground">我的报修</h2>
+        <h2 className="text-xl font-bold text-foreground">{t('myRepairs')}</h2>
         <div className="flex gap-2">
-          <button onClick={loadRequests} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+          <button onClick={loadRequests} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title={language === 'zh' ? '刷新列表' : 'Refresh List'}>
             <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button onClick={() => setView('new')}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition">
-            <Plus className="w-4 h-4" />提交报修
+            <Plus className="w-4 h-4" />{t('requestRepair')}
           </button>
         </div>
       </div>
@@ -1188,10 +1252,10 @@ function StudentView({ token }: { token: string | null }) {
       ) : requests.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <ClipboardList className="w-12 h-12 text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">暂无报修记录</p>
+          <p className="text-muted-foreground">{t('noData')}</p>
           <button onClick={() => setView('new')}
             className="mt-4 px-6 py-2.5 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition">
-            立即报修
+            {t('requestRepair')}
           </button>
         </div>
       ) : (
@@ -1203,10 +1267,10 @@ function StudentView({ token }: { token: string | null }) {
                   onClick={() => { setSelected(r); setView('detail'); }}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-foreground">{r.dormBuilding} {r.dormRoom}</span>
-                    <Badge label={CATEGORY_LABEL[r.category]} colorClass="bg-gray-100 text-gray-700" />
+                    <Badge label={tCat(r.category, t)} colorClass="bg-gray-100 text-gray-700" />
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{r.description}</p>
-                  <p className="text-xs text-muted-foreground mt-2">{new Date(r.createdAt).toLocaleDateString('zh-CN')}</p>
+                  <p className="text-xs text-muted-foreground mt-2">{new Date(r.createdAt).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US')}</p>
                   {/* 已评价工单显示星级 */}
                   {r.rating && r.rating > 0 && (
                     <div className="flex items-center gap-1 mt-1">
@@ -1217,8 +1281,8 @@ function StudentView({ token }: { token: string | null }) {
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
-                  <Badge label={PRIORITY_LABEL[r.priority]} colorClass={PRIORITY_COLOR[r.priority]} />
+                  <Badge label={tStatus(r.status, t)} colorClass={STATUS_COLOR[r.status]} />
+                  <Badge label={tPriority(r.priority, t)} colorClass={PRIORITY_COLOR[r.priority]} />
                   <SlaBadge slaDueDate={r.slaDueDate} status={r.status} />
                   {/* 待评价状态显示高亮按钮 */}
                   {r.status === 'pending_evaluation' && (
@@ -1226,7 +1290,7 @@ function StudentView({ token }: { token: string | null }) {
                       onClick={(e) => { e.stopPropagation(); setEvalTarget(r); setEvalModalOpen(true); }}
                       className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-bold hover:bg-yellow-600 transition animate-pulse shadow-lg shadow-yellow-200"
                     >
-                      去评价
+                      {language === 'zh' ? '去评价' : 'Evaluate'}
                     </button>
                   )}
                 </div>
@@ -1255,6 +1319,7 @@ function StudentView({ token }: { token: string | null }) {
 
 // ─── Technician View ──────────────────────────────────────────────────────────
 function TechnicianView({ token }: { token: string | null }) {
+  const { language, t } = useLanguage();
   const [tasks, setTasks] = useState<RepairRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<RepairRequest | null>(null);
@@ -1272,10 +1337,10 @@ function TechnicianView({ token }: { token: string | null }) {
       const res = await authFetch(API.REPAIRS.LIST, token);
       const data = await res.json() as ApiResponse<RepairRequest[]>;
       if (data.success) setTasks(data.data);
-      else toast.error(data.message || '加载失败');
-    } catch { toast.error('加载失败，请确认后端服务已启动'); }
+      else toast.error(data.message || (language === 'zh' ? '加载失败' : 'Load failed'));
+    } catch { toast.error(language === 'zh' ? '加载失败，请确认后端服务已启动' : 'Load failed, make sure backend service is running'); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, language]);
 
   const loadInventoryParts = useCallback(async () => {
     if (!token) return;
@@ -1295,7 +1360,7 @@ function TechnicianView({ token }: { token: string | null }) {
 
   async function updateTask(taskId: string, status: string) {
     if (status === 'completed' && (!workNote || workNote.trim().length < 5)) {
-      toast.error('完成维修时必须填写至少5个字的维修记录');
+      toast.error(language === 'zh' ? '完成维修时必须填写至少5个字的维修记录' : 'You must enter at least 5 characters of work note to complete repair');
       return;
     }
     setUpdating(true);
@@ -1314,16 +1379,16 @@ function TechnicianView({ token }: { token: string | null }) {
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
-        toast.success('任务状态已更新');
+        toast.success(language === 'zh' ? '任务状态已更新' : 'Task status updated');
         setSelected(null);
         setWorkNote('');
         setSelectedParts({});
         loadTasks();
         loadInventoryParts();
       } else {
-        toast.error(data.message || await readApiMessage(res, '更新失败'));
+        toast.error(data.message || await readApiMessage(res, language === 'zh' ? '更新失败' : 'Failed to update'));
       }
-    } catch { toast.error('网络错误'); }
+    } catch { toast.error(language === 'zh' ? '网络错误' : 'Network error'); }
     finally { setUpdating(false); }
   }
 
@@ -1339,7 +1404,7 @@ function TechnicianView({ token }: { token: string | null }) {
     <div>
       {/* Tabs */}
       <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6">
-        {([['tasks', '任务列表', Wrench], ['stats', '我的绩效', BarChart2]] as const).map(([key, label, Icon]) => (
+        {([['tasks', t('tabTasks'), Wrench], ['stats', t('tabMyPerformance'), BarChart2]] as const).map(([key, label, Icon]) => (
           <button key={key} onClick={() => setTab(key as 'tasks' | 'stats')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition ${
               tab === key ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
@@ -1353,17 +1418,17 @@ function TechnicianView({ token }: { token: string | null }) {
       {tab === 'tasks' && (
         <>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-foreground">任务列表</h3>
-            <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+            <h3 className="font-semibold text-foreground">{t('tabTasks')}</h3>
+            <button onClick={loadTasks} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title={language === 'zh' ? '刷新列表' : 'Refresh List'}>
               <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
           {/* Stats Summary */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             {[
-              { label: '待处理', count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
-              { label: '进行中', count: inProgress.length, color: 'bg-purple-50 text-purple-700', icon: Wrench },
-              { label: '已完成', count: completed.length, color: 'bg-green-50 text-green-700', icon: CheckCircle },
+              { label: t('status_pending'), count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
+              { label: t('status_in_progress'), count: inProgress.length, color: 'bg-purple-50 text-purple-700', icon: Wrench },
+              { label: t('status_completed'), count: completed.length, color: 'bg-green-50 text-green-700', icon: CheckCircle },
             ].map(({ label, count, color, icon: Icon }) => (
               <div key={label} className={`rounded-2xl p-4 ${color} flex flex-col items-center`}>
                 <Icon className="w-5 h-5 mb-1" />
@@ -1380,62 +1445,62 @@ function TechnicianView({ token }: { token: string | null }) {
       ) : tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Wrench className="w-12 h-12 text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">暂无分配任务</p>
+          <p className="text-muted-foreground">{language === 'zh' ? '暂无分配任务' : 'No assigned tasks'}</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {tasks.map((t) => (
-            <div key={t.id} className="bg-white rounded-2xl shadow-sm border border-border p-4">
+          {tasks.map((task) => (
+            <div key={task.id} className="bg-white rounded-2xl shadow-sm border border-border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-foreground">{t.dormBuilding} {t.dormRoom}</span>
-                    <Badge label={CATEGORY_LABEL[t.category || 'other']} colorClass="bg-gray-100 text-gray-700" />
-                    {t.priority && <Badge label={PRIORITY_LABEL[t.priority]} colorClass={PRIORITY_COLOR[t.priority]} />}
+                    <span className="font-semibold text-foreground">{task.dormBuilding} {task.dormRoom}</span>
+                    <Badge label={tCat(task.category || 'other', t)} colorClass="bg-gray-100 text-gray-700" />
+                    {task.priority && <Badge label={tPriority(task.priority, t)} colorClass={PRIORITY_COLOR[task.priority]} />}
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{t.description}</p>
-                  {t.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{t.studentName}</p>}
+                  <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+                  {task.studentName && <p className="text-xs text-muted-foreground mt-1">{language === 'zh' ? `学生：${task.studentName}` : `Student: ${task.studentName}`}</p>}
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <Badge label={STATUS_LABEL[t.status]} colorClass={STATUS_COLOR[t.status]} />
-                  <SlaBadge slaDueDate={t.slaDueDate} status={t.status} />
+                  <Badge label={tStatus(task.status, t)} colorClass={STATUS_COLOR[task.status]} />
+                  <SlaBadge slaDueDate={task.slaDueDate} status={task.status} />
                 </div>
               </div>
-              {t.adminNote && (
+              {task.adminNote && (
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground">管理员备注：{t.adminNote}</p>
+                  <p className="text-xs text-muted-foreground">管理员备注：{task.adminNote}</p>
                 </div>
               )}
-              {t.workNote && (
+              {task.workNote && (
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground">维修记录：{t.workNote}</p>
+                  <p className="text-xs text-muted-foreground">维修记录：{task.workNote}</p>
                 </div>
               )}
               {/* 评价信息显示（只读） */}
-              {t.rating && t.rating > 0 && (
+              {task.rating && task.rating > 0 && (
                 <div className="mt-3 pt-3 border-t border-border bg-yellow-50/50 -mx-4 px-4 pb-1 rounded-b-2xl">
                   <p className="text-xs font-medium text-foreground mb-1">⭐ 学生评价</p>
                   <div className="flex items-center gap-1 mb-1">
                     {[1,2,3,4,5].map((s) => (
-                      <Star key={s} className={`w-4 h-4 ${s <= t.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
+                      <Star key={s} className={`w-4 h-4 ${s <= task.rating! ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />
                     ))}
                   </div>
-                  {t.feedbackTags && (
+                  {task.feedbackTags && (
                     <div className="flex flex-wrap gap-1 mb-1">
-                      {t.feedbackTags.split(',').map((tag) => (
+                      {task.feedbackTags.split(',').map((tag) => (
                         <span key={tag} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">{tag}</span>
                       ))}
                     </div>
                   )}
-                  {t.feedbackText && (
-                    <p className="text-xs text-muted-foreground">"{t.feedbackText}"</p>
+                  {task.feedbackText && (
+                    <p className="text-xs text-muted-foreground">"{task.feedbackText}"</p>
                   )}
                 </div>
               )}
               <div className="mt-3 pt-3 border-t border-border">
-                {selected?.id === t.id ? (
+                {selected?.id === task.id ? (
                   <div className="space-y-3">
-                    {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' && (
+                    {task.status !== 'completed' && task.status !== 'rejected' && task.status !== 'pending_evaluation' && task.status !== 'closed' && (
                       <>
                         <textarea value={workNote} onChange={(e) => setWorkNote(e.target.value)}
                           rows={2} placeholder="填写维修记录（必填，至少5个字）"
@@ -1497,32 +1562,32 @@ function TechnicianView({ token }: { token: string | null }) {
 
                         <div className="flex gap-2">
                           <button onClick={() => { setSelected(null); setWorkNote(''); setSelectedParts({}); }}
-                            className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
-                          {(t.status === 'pending' || t.status === 'approved') && (
-                            <button onClick={() => updateTask(t.id, 'in_progress')} disabled={updating}
+                            className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">{t('cancel')}</button>
+                          {(task.status === 'pending' || task.status === 'approved') && (
+                            <button onClick={() => updateTask(task.id, 'in_progress')} disabled={updating}
                               className="flex-1 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                              {updating ? '...' : '开始维修'}
+                              {updating ? '...' : (language === 'zh' ? '开始维修' : 'Start Repair')}
                             </button>
                           )}
-                          <button onClick={() => updateTask(t.id, 'completed')} disabled={updating}
+                          <button onClick={() => updateTask(task.id, 'completed')} disabled={updating}
                             className="flex-1 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                            {updating ? '...' : '完成维修'}
+                            {updating ? '...' : t('completeRepair')}
                           </button>
                         </div>
                       </>
                     )}
-                    <ConsumedPartsList repairId={t.id} token={token} status={t.status} />
-                    <RepairComments repairId={t.id} token={token} />
+                    <ConsumedPartsList repairId={task.id} token={token} status={task.status} />
+                    <RepairComments repairId={task.id} token={token} />
                     <button onClick={() => { setSelected(null); setWorkNote(''); setSelectedParts({}); }}
                       className="w-full py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition mt-2">
-                      收起
+                      {language === 'zh' ? '收起' : 'Collapse'}
                     </button>
                   </div>
 
                 ) : (
-                  <button onClick={() => setSelected(t)}
+                  <button onClick={() => setSelected(task)}
                     className="w-full py-2 rounded-xl border border-primary text-primary text-sm font-medium hover:bg-primary/5 transition">
-                    {t.status !== 'completed' && t.status !== 'rejected' && t.status !== 'pending_evaluation' && t.status !== 'closed' ? '更新状态 / 讨论' : '查看讨论'}
+                    {task.status !== 'completed' && task.status !== 'rejected' && task.status !== 'pending_evaluation' && task.status !== 'closed' ? (language === 'zh' ? '更新状态 / 讨论' : 'Update Status / Discuss') : (language === 'zh' ? '查看讨论' : 'View Discussion')}
                   </button>
                 )}
               </div>
@@ -1536,31 +1601,31 @@ function TechnicianView({ token }: { token: string | null }) {
       {tab === 'stats' && (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
-            <h3 className="text-lg font-bold text-foreground mb-6">绩效概览</h3>
+            <h3 className="text-lg font-bold text-foreground mb-6">{language === 'zh' ? '绩效概览' : 'Performance Overview'}</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-blue-50 text-blue-700 rounded-2xl p-4 flex flex-col">
-                <span className="text-xs font-medium mb-1">总任务数</span>
+                <span className="text-xs font-medium mb-1">{language === 'zh' ? '总任务数' : 'Total Tasks'}</span>
                 <span className="text-3xl font-bold">{tasks.length}</span>
               </div>
               <div className="bg-green-50 text-green-700 rounded-2xl p-4 flex flex-col">
-                <span className="text-xs font-medium mb-1">已完成任务</span>
+                <span className="text-xs font-medium mb-1">{language === 'zh' ? '已完成任务' : 'Completed Tasks'}</span>
                 <span className="text-3xl font-bold">{completed.length}</span>
               </div>
               <div className="bg-yellow-50 text-yellow-700 rounded-2xl p-4 flex flex-col">
-                <span className="text-xs font-medium mb-1">待处理任务</span>
+                <span className="text-xs font-medium mb-1">{language === 'zh' ? '待处理任务' : 'Pending Tasks'}</span>
                 <span className="text-3xl font-bold">{pending.length}</span>
               </div>
               <div className="bg-purple-50 text-purple-700 rounded-2xl p-4 flex flex-col">
-                <span className="text-xs font-medium mb-1">进行中任务</span>
+                <span className="text-xs font-medium mb-1">{language === 'zh' ? '进行中任务' : 'In Progress Tasks'}</span>
                 <span className="text-3xl font-bold">{inProgress.length}</span>
               </div>
             </div>
 
             <div className="bg-muted/30 rounded-2xl p-6 border border-border flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground mb-1">平均服务评分</p>
+                <p className="text-sm font-medium text-muted-foreground mb-1">{language === 'zh' ? '平均服务评分' : 'Average Service Rating'}</p>
                 <div className="flex items-end gap-3">
-                  <span className="text-4xl font-extrabold text-foreground">{avgRating}</span>
+                  <span className="text-4xl font-extrabold text-foreground">{avgRating === '暂无' && language !== 'zh' ? 'None' : avgRating}</span>
                   <span className="text-sm text-muted-foreground mb-1.5">/ 5.0</span>
                 </div>
               </div>
@@ -1571,7 +1636,7 @@ function TechnicianView({ token }: { token: string | null }) {
               </div>
             </div>
             
-            <p className="text-xs text-muted-foreground mt-4 text-center">以上数据根据您分配的维修任务本地计算得出。</p>
+            <p className="text-xs text-muted-foreground mt-4 text-center">{language === 'zh' ? '以上数据根据您分配的维修任务本地计算得出。' : 'The above data is calculated locally based on your assigned tasks.'}</p>
           </div>
         </div>
       )}
@@ -1581,6 +1646,7 @@ function TechnicianView({ token }: { token: string | null }) {
 
 // ─── Admin View ───────────────────────────────────────────────────────────────
 function AdminView({ token }: { token: string | null }) {
+  const { language, t } = useLanguage();
   const [tab, setTab] = useState<'repairs' | 'stats' | 'parts' | 'users' | 'ai'>('repairs');
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -1740,15 +1806,15 @@ function AdminView({ token }: { token: string | null }) {
   const filteredRepairs = repairs;
 
   const pieData = stats?.categoryStats?.map(({ category, count }) => ({
-    name: CATEGORY_LABEL[category] || category,
+    name: tCat(category, t) || category,
     value: count
   })) || [];
 
   const barData = stats ? [
-    { name: '待处理', count: stats.pendingRequests, color: '#f59e0b' },
-    { name: '维修中', count: stats.inProgressRequests, color: '#8b5cf6' },
-    { name: '已完成', count: stats.completedRequests, color: '#10b981' },
-    { name: '已拒绝', count: stats.rejectedRequests || 0, color: '#ef4444' }
+    { name: t('status_pending'), count: stats.pendingRequests, color: '#f59e0b' },
+    { name: t('status_in_progress'), count: stats.inProgressRequests, color: '#8b5cf6' },
+    { name: t('status_completed'), count: stats.completedRequests, color: '#10b981' },
+    { name: t('status_rejected'), count: stats.rejectedRequests || 0, color: '#ef4444' }
   ] : [];
 
   const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#6b7280'];
@@ -1757,8 +1823,13 @@ function AdminView({ token }: { token: string | null }) {
     <div>
       {/* Tabs */}
       <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6">
-        {([['repairs', '报修管理', ClipboardList], ['stats', '数据统计', BarChart2], ['parts', '库存管理', Wrench], ['users', '用户管理', Users], ['ai', 'AI助手配置', Bot]] as const).map(([key, label, Icon]) => (
-
+        {([
+          ['repairs', t('tabRepairs'), ClipboardList],
+          ['stats', t('tabStats'), BarChart2],
+          ['parts', t('tabParts'), Wrench],
+          ['users', t('tabUsers') || '用户管理', Users],
+          ['ai', t('tabAI') || 'AI助手配置', Bot]
+        ] as const).map(([key, label, Icon]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition ${
               tab === key ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
@@ -1773,12 +1844,12 @@ function AdminView({ token }: { token: string | null }) {
       {tab === 'repairs' && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-foreground">报修申请列表</h3>
+            <h3 className="font-semibold text-foreground">{t('repairList')}</h3>
             <div className="flex gap-2">
               <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl border border-border hover:bg-muted transition text-sm font-medium flex items-center gap-1.5">
-                导出 CSV
+                {t('exportCSV')}
               </button>
-              <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+              <button onClick={loadRepairs} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title={language === 'zh' ? '刷新列表' : 'Refresh List'}>
                 <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
               </button>
             </div>
@@ -1790,7 +1861,7 @@ function AdminView({ token }: { token: string | null }) {
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   filterStatus === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}>
-                {s === 'all' ? '全部' : STATUS_LABEL[s]}
+                {s === 'all' ? (language === 'zh' ? '全部' : 'All') : tStatus(s, t)}
               </button>
             ))}
           </div>
@@ -1802,7 +1873,7 @@ function AdminView({ token }: { token: string | null }) {
           ) : filteredRepairs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16">
               <ClipboardList className="w-12 h-12 text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">暂无报修记录</p>
+              <p className="text-muted-foreground">{t('noData')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -1812,17 +1883,17 @@ function AdminView({ token }: { token: string | null }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-foreground">{r.dormBuilding} {r.dormRoom}</span>
-                        <Badge label={CATEGORY_LABEL[r.category]} colorClass="bg-gray-100 text-gray-700" />
-                        <Badge label={PRIORITY_LABEL[r.priority]} colorClass={PRIORITY_COLOR[r.priority]} />
+                        <Badge label={tCat(r.category, t)} colorClass="bg-gray-100 text-gray-700" />
+                        <Badge label={tPriority(r.priority, t)} colorClass={PRIORITY_COLOR[r.priority]} />
                         {r.adminNote?.startsWith('[🤖 AI智能派单]') && (
-                          <Badge label="🤖 智能派单" colorClass="bg-blue-100 text-blue-800 border-blue-200" />
+                          <Badge label={t('dispatchBadge') || '🤖 智能派单'} colorClass="bg-blue-100 text-blue-800 border-blue-200" />
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{r.description}</p>
-                      {r.studentName && <p className="text-xs text-muted-foreground mt-1">学生：{r.studentName}</p>}
-                      {r.assignedToName && <p className="text-xs text-muted-foreground">维修员：{r.assignedToName}</p>}
+                      {r.studentName && <p className="text-xs text-muted-foreground mt-1">{language === 'zh' ? `学生：${r.studentName}` : `Student: ${r.studentName}`}</p>}
+                      {r.assignedToName && <p className="text-xs text-muted-foreground">{language === 'zh' ? `维修员：${r.assignedToName}` : `Technician: ${r.assignedToName}`}</p>}
 
-                      <p className="text-xs text-muted-foreground mt-1">{new Date(r.createdAt).toLocaleString('zh-CN')}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{new Date(r.createdAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US')}</p>
                       {/* 评价信息显示 */}
                       {r.rating && r.rating > 0 && (
                         <div className="flex items-center gap-1.5 mt-1">
@@ -1836,11 +1907,11 @@ function AdminView({ token }: { token: string | null }) {
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
-                      <Badge label={STATUS_LABEL[r.status]} colorClass={STATUS_COLOR[r.status]} />
+                      <Badge label={tStatus(r.status, t)} colorClass={STATUS_COLOR[r.status]} />
                       <SlaBadge slaDueDate={r.slaDueDate} status={r.status} />
                       <button onClick={() => { setSelected(r); setAssignForm({ status: r.status, assignedTo: r.assignedTo || '', adminNote: r.adminNote || '', priority: r.priority }); }}
                         className="flex items-center gap-1 text-xs text-primary hover:underline">
-                        <Eye className="w-3 h-3" />处理
+                        <Eye className="w-3 h-3" />{language === 'zh' ? '处理' : 'Process'}
                       </button>
                     </div>
                   </div>
@@ -1850,28 +1921,28 @@ function AdminView({ token }: { token: string | null }) {
                     <form onSubmit={handleAssign} className="mt-4 pt-4 border-t border-border space-y-3">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-medium text-muted-foreground mb-1">更新状态</label>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '更新状态' : 'Update Status'}</label>
                           <select value={assignForm.status} onChange={(e) => setAssignForm(p => ({ ...p, status: e.target.value }))}
                             className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                            <option value="pending">待审核</option>
-                            <option value="approved">已审核</option>
-                            <option value="in_progress">维修中</option>
-                            <option value="completed">已完成（待评价）</option>
-                            <option value="closed">已结案</option>
-                            <option value="rejected">已拒绝</option>
+                            <option value="pending">{t('status_pending')}</option>
+                            <option value="approved">{t('status_approved')}</option>
+                            <option value="in_progress">{t('status_in_progress')}</option>
+                            <option value="completed">{t('status_completed')}</option>
+                            <option value="closed">{t('status_closed')}</option>
+                            <option value="rejected">{t('status_rejected')}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-muted-foreground mb-1">分配维修员</label>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '分配维修员' : 'Assign Technician'}</label>
                           <select value={assignForm.assignedTo} onChange={(e) => setAssignForm(p => ({ ...p, assignedTo: e.target.value }))}
                             className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                            <option value="">不分配</option>
-                            {technicians.map((t) => {
-                              const count = t.activeTasksCount || 0;
-                              const label = count === 0 ? '空闲' : `${count}单在办`;
+                            <option value="">{language === 'zh' ? '不分配' : 'Unassigned'}</option>
+                            {technicians.map((tech) => {
+                              const count = tech.activeTasksCount || 0;
+                              const label = count === 0 ? (language === 'zh' ? '空闲' : 'Idle') : (language === 'zh' ? `${count}单在办` : `${count} active`);
                               return (
-                                <option key={t.id} value={t.id}>
-                                  {t.name} ({label})
+                                <option key={tech.id} value={tech.id}>
+                                  {tech.name} ({label})
                                 </option>
                               );
                             })}
@@ -1880,27 +1951,27 @@ function AdminView({ token }: { token: string | null }) {
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-medium text-muted-foreground mb-1">修改优先级</label>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '修改优先级' : 'Edit Priority'}</label>
                           <select value={assignForm.priority} onChange={(e) => setAssignForm(p => ({ ...p, priority: e.target.value }))}
                             className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                            <option value="low">低</option>
-                            <option value="normal">普通</option>
-                            <option value="high">高</option>
-                            <option value="urgent">紧急</option>
+                            <option value="low">{t('priority_low')}</option>
+                            <option value="normal">{t('priority_normal')}</option>
+                            <option value="high">{t('priority_high')}</option>
+                            <option value="urgent">{t('priority_urgent')}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-muted-foreground mb-1">管理员备注</label>
+                          <label className="block text-xs font-medium text-muted-foreground mb-1">{t('adminNote')}</label>
                           <input value={assignForm.adminNote} onChange={(e) => setAssignForm(p => ({ ...p, adminNote: e.target.value }))}
-                            placeholder="可选备注" className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            placeholder={language === 'zh' ? '可选备注' : 'Optional notes'} className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                         </div>
                       </div>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => setSelected(null)}
-                          className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
+                          className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">{t('cancel')}</button>
                         <button type="submit" disabled={assigning}
                           className="flex-1 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                          {assigning ? '保存中...' : '保存'}
+                          {assigning ? (language === 'zh' ? '保存中...' : 'Saving...') : (language === 'zh' ? '保存' : 'Save')}
                         </button>
                       </div>
                       <ConsumedPartsList repairId={r.id} token={token} status={r.status} />
@@ -2409,6 +2480,7 @@ function SubaoChatWidget({ token, role }: { token: string | null; role: string }
 
 export default function Index() {
   const { user, token, logout } = useAuth();
+  const { language, setLanguage, t } = useLanguage();
   const [profile, setProfile] = useState<User | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -2438,7 +2510,7 @@ export default function Index() {
   }
 
   const displayProfile = profile || user;
-  const roleLabel = displayProfile.role === 'student' ? '学生' : displayProfile.role === 'technician' ? '维修人员' : '管理员';
+  const roleLabel = displayProfile.role === 'student' ? t('role_student') : displayProfile.role === 'technician' ? t('role_technician') : t('role_admin');
   const roleColor = displayProfile.role === 'admin' ? 'bg-purple-100 text-purple-700' : displayProfile.role === 'technician' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
 
   const showProfile = () => {
@@ -2467,22 +2539,30 @@ export default function Index() {
           <div 
             onClick={() => window.location.reload()} 
             className="flex items-center gap-3 cursor-pointer select-none group"
-            title="刷新工作台"
+            title={language === 'zh' ? '刷新工作台' : 'Refresh dashboard'}
           >
             <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center group-hover:scale-105 active:scale-95 transition">
               <Wrench className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-bold text-foreground leading-tight group-hover:text-primary transition">智能宿舍报修平台</h1>
-              <p className="text-xs text-muted-foreground hidden sm:block">在线报修 · 实时追踪</p>
+              <h1 className="font-bold text-foreground leading-tight group-hover:text-primary transition">{t('title')}</h1>
+              <p className="text-xs text-muted-foreground hidden sm:block">{t('subtitle')}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition font-medium"
+              title={language === 'zh' ? 'Switch to English' : '切换为中文'}
+            >
+              <span>🌐</span>
+              <span className="hidden sm:inline font-medium">{language === 'zh' ? 'EN' : '中文'}</span>
+            </button>
             <NotificationsMenu token={token} />
             <div 
               onClick={() => setIsSettingsOpen(true)}
               className="hidden sm:flex items-center gap-2 cursor-pointer hover:bg-muted p-1.5 rounded-xl transition duration-200 active:scale-95 select-none"
-              title="个人设置"
+              title={t('settings')}
             >
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shadow-inner">
                 <span className="text-primary font-semibold text-sm">{displayProfile.name.charAt(0)}</span>
@@ -2495,7 +2575,7 @@ export default function Index() {
             <button onClick={logout}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition">
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">退出</span>
+              <span className="hidden sm:inline">{t('logout')}</span>
             </button>
           </div>
         </div>
@@ -2508,7 +2588,7 @@ export default function Index() {
         <div className="bg-gradient-to-r from-primary to-blue-600 rounded-2xl p-5 mb-6 text-white shadow-md">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-white/80 text-sm">欢迎回来</p>
+              <p className="text-white/80 text-sm">{t('welcome')}</p>
               <h2 className="text-xl font-bold mt-0.5">{displayProfile.name}</h2>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-white/80 text-sm">{roleLabel}</span>

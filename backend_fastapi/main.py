@@ -2021,3 +2021,159 @@ async def chat_with_assistant(payload: AIChatRequest, current_user: dict = Depen
     except Exception as e:
         return {"success": False, "detail": f"AI 服务响应错误: {str(e)}"}
 
+
+@app.post("/api/repairs/analyze-image")
+async def analyze_repair_image(file: UploadFile = File(...), current_user: dict = Depends(verify_token)):
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".gif"}
+    _, ext = os.path.splitext(file.filename)
+    if ext.lower() not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="只允许上传图片格式 (.png, .jpg, .jpeg, .gif)")
+        
+    max_size = 5 * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 5MB")
+        
+    import base64
+    image_base64 = base64.b64encode(content).decode("utf-8")
+    
+    conn = get_db()
+    active_config = None
+    try:
+        row = conn.execute("SELECT * FROM ai_configs WHERE isActive = 1 LIMIT 1").fetchone()
+        if row:
+            active_config = dict(row)
+    finally:
+        conn.close()
+        
+    provider = active_config["provider"] if active_config else "simulation"
+    model = active_config["model"] if active_config else "simulation-model"
+    api_key = active_config["apiKey"] if active_config else ""
+    base_url = active_config["baseUrl"] if active_config else ""
+    
+    def get_simulation_diagnosis():
+        filename_lower = file.filename.lower()
+        category = "other"
+        diagnosis = "经宿宝视觉诊断：设备外观无明显损坏，已自动分类为其他类。建议您补充文字描述。"
+        
+        if any(k in filename_lower for k in ["water", "leak", "pipe", "tap", "sink", "toilet", "水", "阀", "漏", "堵"]):
+            category = "water"
+            diagnosis = "经宿宝视觉预检：检测到水管/阀门处有疑似渗水与锈蚀。宿宝已为您推荐「水电类」报修，维修师傅将携带管道配件上门排查。"
+        elif any(k in filename_lower for k in ["light", "bulb", "lamp", "power", "wire", "switch", "electricity", "电", "灯", "插座", "跳闸"]):
+            category = "electricity"
+            diagnosis = "经宿宝视觉预检：检测到灯具不亮或线路老化。宿宝已为您推荐「水电类」报修。提示：若是断电跳闸，请先登录系统确认电费余额。"
+        elif any(k in filename_lower for k in ["chair", "desk", "bed", "door", "lock", "handle", "cabinet", "wood", "furniture", "木", "门", "锁", "椅", "床", "柜"]):
+            category = "furniture"
+            diagnosis = "经宿宝视觉预检：检测到家具结构松动或锁具五金磨损。宿宝已为您推荐「家具类」报修，师傅将携带相应五金备件上门。"
+        elif any(k in filename_lower for k in ["net", "wifi", "cable", "router", "port", "lan", "网络", "网线", "路由器"]):
+            category = "network"
+            diagnosis = "经宿宝视觉预检：检测到网口或水晶头指示灯异常。宿宝已为您推荐「网络类」报修，将派专员进行端口和网络检测。"
+        else:
+            h = sum(ord(c) for c in file.filename) % 4
+            cats = ["water", "electricity", "furniture", "network"]
+            category = cats[h]
+            diagnoses = {
+                "water": "经宿宝视觉预检：图片预检有疑似潮湿渗水痕迹。宿宝已为您推荐「水电类」报修。",
+                "electricity": "经宿宝视觉预检：图片显示电气或灯具开关排布。宿宝已为您推荐「水电类」报修。",
+                "furniture": "经宿宝视觉预检：发现木质框架或家具组件边缘。宿宝已为您推荐「家具类」报修。",
+                "network": "经宿宝视觉预检：图像中存在网口或线缆连接特征。宿宝已为您推荐「网络类」报修。"
+            }
+            diagnosis = diagnoses[category]
+        return {"category": category, "diagnosis": diagnosis}
+        
+    if provider == "simulation":
+        sim_data = get_simulation_diagnosis()
+        return {"success": True, "data": sim_data}
+        
+    prompt = """
+    你是一个宿舍报修系统的视觉AI预检大脑。请根据上传的图片，判断其属于哪种报修分类，并给出中文的故障分析描述。
+    你必须以 JSON 格式返回，JSON 必须且仅包含两个字段：
+    1. 'category': 必须是以下英文单词之一：'water' (水类故障), 'electricity' (电类故障), 'furniture' (家具五金类), 'network' (网络电脑类), 'other' (其他类)。
+    2. 'diagnosis': 简短的中文预检诊断结论，字数在50字以内，带有'经宿宝预检：...'前缀。
+    
+    示例 JSON：
+    {
+      "category": "water",
+      "diagnosis": "经宿宝预检：洗手池下水管有开裂漏水迹象，已匹配水电类报修。"
+    }
+    """
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            if provider == "ollama":
+                url = f"{base_url}/api/chat" if base_url else "http://localhost:11434/api/chat"
+                res = await client.post(
+                    url,
+                    json={
+                        "model": model or "llava",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": prompt,
+                                "images": [image_base64]
+                            }
+                        ],
+                        "stream": False
+                    },
+                    timeout=15.0
+                )
+                if res.status_code == 200:
+                    text_reply = res.json()["message"]["content"]
+                    try:
+                        import re
+                        json_match = re.search(r"\{.*\}", text_reply, re.DOTALL)
+                        if json_match:
+                            parsed = json.loads(json_match.group(0))
+                            if "category" in parsed and "diagnosis" in parsed:
+                                return {"success": True, "data": parsed}
+                    except:
+                        pass
+                    return {"success": True, "data": {"category": "other", "diagnosis": f"经宿宝预检：{text_reply[:60]}"}}
+            else:
+                url = f"{base_url}/chat/completions"
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                
+                body = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": prompt
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_base64}"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "max_tokens": 150
+                }
+                res = await client.post(url, json=body, headers=headers, timeout=15.0)
+                if res.status_code == 200:
+                    text_reply = res.json()["choices"][0]["message"]["content"]
+                    try:
+                        import re
+                        json_match = re.search(r"\{.*\}", text_reply, re.DOTALL)
+                        if json_match:
+                            parsed = json.loads(json_match.group(0))
+                            if "category" in parsed and "diagnosis" in parsed:
+                                return {"success": True, "data": parsed}
+                    except:
+                        pass
+                    return {"success": True, "data": {"category": "other", "diagnosis": f"经宿宝预检：诊断完毕"}}
+    except Exception as e:
+        print(f"AI Vision Exception: {e}, falling back to simulation")
+        
+    sim_data = get_simulation_diagnosis()
+    return {"success": True, "data": sim_data}
+

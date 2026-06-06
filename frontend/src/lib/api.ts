@@ -16,6 +16,7 @@ export const API = {
     UPDATE_STATUS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/status`,
     EVALUATE: (id: string) => `${API_BASE_URL}/api/repairs/${id}/evaluate`,
     ANALYZE: `${API_BASE_URL}/api/repairs/analyze`,
+    ANALYZE_IMAGE: `${API_BASE_URL}/api/repairs/analyze-image`,
     EXPORT: `${API_BASE_URL}/api/repairs/export`,
     COMMENTS: (id: string) => `${API_BASE_URL}/api/repairs/${id}/comments`,
   },

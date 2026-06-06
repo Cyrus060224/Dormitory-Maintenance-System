@@ -1,0 +1,260 @@
+export const translations = {
+  zh: {
+    title: '智能宿舍报修平台',
+    subtitle: '在线报修 · 实时追踪',
+    welcome: '欢迎回来',
+    logout: '退出',
+    profile: '个人中心',
+    settings: '个人设置',
+    username: '姓名',
+    role: '身份',
+    email: '邮箱',
+    studentId: '学号',
+    dormRoom: '宿舍号',
+    phone: '电话',
+    skills: '专业技能',
+    save: '保存',
+    cancel: '取消',
+    submit: '提交',
+    confirm: '确认',
+    edit: '编辑',
+    delete: '删除',
+    actions: '操作',
+    status: '状态',
+    priority: '优先级',
+    createdAt: '创建时间',
+    updatedAt: '更新时间',
+    loading: '加载中...',
+    noData: '暂无数据',
+    refresh: '刷新',
+    
+    // Tabs
+    tabRepairs: '报修管理',
+    tabStats: '数据统计',
+    tabParts: '库存管理',
+    tabUsers: '用户管理',
+    tabAI: 'AI助手配置',
+    tabTasks: '任务列表',
+    tabMyPerformance: '我的绩效',
+
+    // Priorities
+    priority_low: '低',
+    priority_normal: '普通',
+    priority_high: '高',
+    priority_urgent: '紧急',
+
+    // Categories
+    cat_water: '水暖类',
+    cat_electricity: '用电类',
+    cat_furniture: '家具类',
+    cat_network: '网络类',
+    cat_other: '其他类',
+
+    // Statuses
+    status_pending: '待审批',
+    status_approved: '已审批/待接单',
+    status_in_progress: '维修中',
+    status_completed: '已完工/待评价',
+    status_pending_evaluation: '待评价',
+    status_closed: '已结案',
+    status_rejected: '已拒绝',
+
+    // Roles
+    role_student: '学生',
+    role_technician: '维修员',
+    role_admin: '管理员',
+
+    // Student View
+    requestRepair: '申请报修',
+    myRepairs: '我的报修记录',
+    dormBuilding: '楼栋',
+    roomNumber: '房间号',
+    faultCategory: '故障分类',
+    faultDescription: '故障详情描述',
+    uploadPhoto: '上传故障照片',
+    photoTip: '支持 png, jpg, jpeg 格式，大小不超过 5MB',
+    describePlaceholder: '请详细描述故障情况，例如：洗手池下方软管开裂漏水，不停往外渗水...',
+    aiDiagnosis: '宿宝 AI 图片预检诊断中...',
+    dispatchBadge: '🤖 智能派单',
+
+    // Admin View
+    repairList: '报修申请列表',
+    exportCSV: '导出 CSV',
+    assignTask: '指派任务/审批',
+    selectTech: '选择维修人员',
+    adminNote: '管理员内部备注',
+    priorityLabel: '报修优先级',
+    partInventory: '备品备件库存列表',
+    addPart: '添加配件',
+    partName: '配件名称',
+    unitPrice: '单价',
+    currentStock: '当前库存',
+    editPart: '编辑/补库',
+
+    // Tech View
+    assignedTasks: '待办任务',
+    completeRepair: '完成维修',
+    workNote: '维修工作记录',
+    partsUsed: '消耗的备件',
+    workNotePlaceholder: '请输入维修工作记录（至少5个字，如更换了冷热水阀）',
+    selectPartsTip: '请在下方勾选本次维修所消耗的备件，并填写数量',
+
+    // Stats
+    totalRepairs: '总报修数',
+    pendingCount: '待处理',
+    inProgressCount: '维修中',
+    completedCount: '已完成',
+    rejectedCount: '已拒绝',
+    materialCost: '物料开销',
+    slaRate: 'SLA达标率',
+    avgCost: '备件物料总支出',
+    rankingTitle: '备品备件消耗排行',
+    rankName: '名称',
+    rankCount: '消耗数量',
+    rankCost: '总成本',
+
+    // Chat widget
+    chatGreeting: '你好呀！我是宿舍小助手 **「宿宝」** 🤖✨。有什么关于宿舍报修、起居生活或管理系统的问题，都可以随时问我哦！',
+    chatPlaceholder: '发送给宿宝的问题...',
+    chatTooltip: '问问宿宝 🤖',
+    chatReset: '对话已重置。你好，我是「宿宝」，有什么我可以帮你的吗？',
+    
+    // Suggestion Chips
+    chip_power: '宿舍停电怎么办？',
+    chip_submit: '如何提交报修单？',
+    chip_password: '修改我的密码',
+    chip_tech_power: '用电安全指引',
+    chip_tech_leak: '水管漏水应急处理',
+    chip_admin_export: '如何导出报修记录？',
+    chip_admin_ai: '如何启用新AI模型？'
+  },
+  en: {
+    title: 'Smart Dorm Maintenance',
+    subtitle: 'Online Reporting · Real-time Tracking',
+    welcome: 'Welcome back',
+    logout: 'Logout',
+    profile: 'Profile',
+    settings: 'Settings',
+    username: 'Name',
+    role: 'Role',
+    email: 'Email',
+    studentId: 'Student ID',
+    dormRoom: 'Room No.',
+    phone: 'Phone',
+    skills: 'Skills',
+    save: 'Save',
+    cancel: 'Cancel',
+    submit: 'Submit',
+    confirm: 'Confirm',
+    edit: 'Edit',
+    delete: 'Delete',
+    actions: 'Actions',
+    status: 'Status',
+    priority: 'Priority',
+    createdAt: 'Created At',
+    updatedAt: 'Updated At',
+    loading: 'Loading...',
+    noData: 'No Data',
+    refresh: 'Refresh',
+    
+    // Tabs
+    tabRepairs: 'Repairs',
+    tabStats: 'Statistics',
+    tabParts: 'Inventory',
+    tabUsers: 'Users',
+    tabAI: 'AI Config',
+    tabTasks: 'Tasks List',
+    tabMyPerformance: 'Performance',
+
+    // Priorities
+    priority_low: 'Low',
+    priority_normal: 'Normal',
+    priority_high: 'High',
+    priority_urgent: 'Urgent',
+
+    // Categories
+    cat_water: 'Plumbing',
+    cat_electricity: 'Electrical',
+    cat_furniture: 'Furniture',
+    cat_network: 'Network',
+    cat_other: 'Other',
+
+    // Statuses
+    status_pending: 'Pending',
+    status_approved: 'Approved/Assigned',
+    status_in_progress: 'In Progress',
+    status_completed: 'Completed',
+    status_pending_evaluation: 'Pending Review',
+    status_closed: 'Closed',
+    status_rejected: 'Rejected',
+
+    // Roles
+    role_student: 'Student',
+    role_technician: 'Technician',
+    role_admin: 'Admin',
+
+    // Student View
+    requestRepair: 'Request Repair',
+    myRepairs: 'My Repairs',
+    dormBuilding: 'Building',
+    roomNumber: 'Room',
+    faultCategory: 'Category',
+    faultDescription: 'Description',
+    uploadPhoto: 'Upload Photo',
+    photoTip: 'Supports png, jpg, jpeg formats, up to 5MB',
+    describePlaceholder: 'Provide details about the issue (e.g., sink leaking under the basin)...',
+    aiDiagnosis: 'Subao AI analyzing image...',
+    dispatchBadge: '🤖 Smart Dispatched',
+
+    // Admin View
+    repairList: 'Repairs List',
+    exportCSV: 'Export CSV',
+    assignTask: 'Approve & Assign',
+    selectTech: 'Select Technician',
+    adminNote: 'Internal Admin Note',
+    priorityLabel: 'Repair Priority',
+    partInventory: 'Parts Inventory',
+    addPart: 'Add Part',
+    partName: 'Part Name',
+    unitPrice: 'Unit Price',
+    currentStock: 'Stock',
+    editPart: 'Edit/Restock',
+
+    // Tech View
+    assignedTasks: 'Assigned Tasks',
+    completeRepair: 'Complete Repair',
+    workNote: 'Work Note',
+    partsUsed: 'Consumed Parts',
+    workNotePlaceholder: 'Enter work note (minimum 5 characters, e.g. replaced faucet valves)',
+    selectPartsTip: 'Check parts consumed during this repair and specify quantity',
+
+    // Stats
+    totalRepairs: 'Total Repairs',
+    pendingCount: 'Pending',
+    inProgressCount: 'In Progress',
+    completedCount: 'Completed',
+    rejectedCount: 'Rejected',
+    materialCost: 'Material Cost',
+    slaRate: 'SLA Rate',
+    avgCost: 'Total Parts Cost',
+    rankingTitle: 'Parts Consumption Ranking',
+    rankName: 'Name',
+    rankCount: 'Quantity',
+    rankCost: 'Total Cost',
+
+    // Chat widget
+    chatGreeting: 'Hello! I am your dorm assistant **"Subao"** 🤖✨. Ask me anything about repairs, utilities, or using this management system!',
+    chatPlaceholder: 'Ask Subao a question...',
+    chatTooltip: 'Ask Subao 🤖',
+    chatReset: 'Chat reset. Hello! I am Subao, how can I help you today?',
+
+    // Suggestion Chips
+    chip_power: 'No electricity in dorm?',
+    chip_submit: 'How to submit a repair request?',
+    chip_password: 'Change my password',
+    chip_tech_power: 'Electrical safety guide',
+    chip_tech_leak: 'Plumbing leak emergency',
+    chip_admin_export: 'How to export repairs?',
+    chip_admin_ai: 'How to enable new AI model?'
+  }
+};
