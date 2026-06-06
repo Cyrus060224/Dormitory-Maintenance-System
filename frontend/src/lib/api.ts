@@ -43,6 +43,21 @@ export const API = {
   STATS: {
     GET: `${API_BASE_URL}/api/stats`,
   },
+  PARTS: {
+    LIST: `${API_BASE_URL}/api/parts`,
+    CREATE: `${API_BASE_URL}/api/parts`,
+    UPDATE: (id: string) => `${API_BASE_URL}/api/parts/${id}`,
+    DELETE: (id: string) => `${API_BASE_URL}/api/parts/${id}`,
+    REPAIR_PARTS: (repairId: string) => `${API_BASE_URL}/api/repairs/${repairId}/parts`,
+  },
+  AI: {
+    CONFIG_LIST: `${API_BASE_URL}/api/admin/ai-configs`,
+    CONFIG_CREATE: `${API_BASE_URL}/api/admin/ai-configs`,
+    CONFIG_UPDATE: (id: string) => `${API_BASE_URL}/api/admin/ai-configs/${id}`,
+    CONFIG_DELETE: (id: string) => `${API_BASE_URL}/api/admin/ai-configs/${id}`,
+    CONFIG_TEST: `${API_BASE_URL}/api/admin/ai-configs/test`,
+    CHAT: `${API_BASE_URL}/api/chat`,
+  },
 };
 
 export async function apiRequest(url: string, options?: RequestInit): Promise<Response> {

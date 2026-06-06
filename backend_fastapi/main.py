@@ -88,9 +88,10 @@ DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "dorm.db"
 
 
 def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 
 def init_db():
@@ -175,12 +176,46 @@ def init_db():
             createdAt TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS parts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            price REAL NOT NULL,
+            stock INTEGER NOT NULL,
+            createdAt TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS repair_parts (
+            id TEXT PRIMARY KEY,
+            repairId TEXT NOT NULL,
+            partId TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            price REAL NOT NULL,
+            createdAt TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_configs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            apiKey TEXT,
+            baseUrl TEXT,
+            model TEXT,
+            systemPrompt TEXT,
+            isActive INTEGER DEFAULT 0,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+        )
+    """)
 
     # 数据库迁移：为已有数据库添加新字段
     migration_add_columns(conn)
 
     conn.commit()
     conn.close()
+
 
 
 def migration_add_columns(conn: sqlite3.Connection):
@@ -240,8 +275,61 @@ def migration_add_columns(conn: sqlite3.Connection):
                 createdAt TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS parts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                stock INTEGER NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS repair_parts (
+                id TEXT PRIMARY KEY,
+                repairId TEXT NOT NULL,
+                partId TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                price REAL NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_configs (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                apiKey TEXT,
+                baseUrl TEXT,
+                model TEXT,
+                systemPrompt TEXT,
+                isActive INTEGER DEFAULT 0,
+                createdAt TEXT NOT NULL,
+                updatedAt TEXT NOT NULL
+            )
+        """)
+        # Seed a default simulation AI config if the table is empty
+        row = conn.execute("SELECT COUNT(*) FROM ai_configs").fetchone()
+        if row and row[0] == 0:
+            now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+            conn.execute("""
+                INSERT INTO ai_configs (id, name, provider, apiKey, baseUrl, model, systemPrompt, isActive, createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                "宿宝 (模拟引擎)",
+                "simulation",
+                "",
+                "",
+                "simulation-model",
+                "你是一个可爱的宿舍生活助手，名字叫'宿宝'。请用温柔和善的语气解答学校宿舍生活、报修规范、维修指引相关的问题。",
+                1,
+                now,
+                now
+            ))
     except Exception as e:
         print(f"[Migration] Error: {e}")
+
 
 
 # ─── 状态机定义 ───────────────────────────────────────────────────────────
@@ -259,6 +347,127 @@ STATUS_LABELS = {
 }
 
 
+# ─── SLA Background Compliance Tasks ───────────────────────────────────────────
+import asyncio
+
+async def check_sla_compliance():
+    """检测工单 SLA 的状态，处理即将超期预警与已超期强力干预"""
+    conn = get_db()
+    try:
+        now_utc = datetime.now(timezone.utc)
+        now_str = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        
+        # 查找所有未完成的工单 (pending, approved, in_progress)
+        active_repairs = conn.execute("""
+            SELECT id, studentId, dormBuilding, dormRoom, category, status, priority, assignedTo, adminNote, createdAt, slaDueDate, slaBreached 
+            FROM repairs 
+            WHERE status IN ('pending', 'approved', 'in_progress')
+        """).fetchall()
+        
+        for r in active_repairs:
+            repair_id = r["id"]
+            created_str = r["createdAt"]
+            due_str = r["slaDueDate"]
+            priority = r["priority"]
+            assigned_to = r["assignedTo"]
+            dorm_building = r["dormBuilding"]
+            dorm_room = r["dormRoom"]
+            admin_note = r["adminNote"]
+            
+            try:
+                # 解析时间（处理可能存在的 'Z' 并统一转换为带 UTC 偏移量的 datetime）
+                created_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                due_dt = datetime.fromisoformat(due_str.replace('Z', '+00:00'))
+            except Exception as e:
+                print(f"[SLA Check] Time parse error for repair {repair_id}: {e}")
+                continue
+                
+            total_duration_sec = (due_dt - created_dt).total_seconds()
+            remaining_sec = (due_dt - now_utc).total_seconds()
+            
+            # 计算是否到达 80% 的阀值（即剩余时间少于 20%）
+            warning_threshold = total_duration_sec * 0.20
+            
+            # (A) 超期检测
+            if remaining_sec <= 0 and r["slaBreached"] == 0:
+                # 标记为已超期
+                conn.execute("UPDATE repairs SET slaBreached = 1, updatedAt = ? WHERE id = ?", (now_str, repair_id))
+                
+                # 发送通知
+                # 1. 给学生发送加急通知
+                conn.execute(
+                    "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), r["studentId"], "⏳ 报修服务加急提醒", f"您的工单（{dorm_building} {dorm_room}）已超出响应时效，系统已提醒管理员加急处理。", "sla_breached", repair_id, 0, now_str)
+                )
+                
+                # 2. 如果分配了维修工，给维修工发送超期警告
+                if assigned_to:
+                    conn.execute(
+                        "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (str(uuid.uuid4()), assigned_to, "🚨 工单超期警告", f"工单（{dorm_building} {dorm_room}）已超期未解决，请立即处理并联系学生说明情况！", "sla_breached", repair_id, 0, now_str)
+                    )
+                
+                # 3. 给所有管理员发送预警通知
+                admins = conn.execute("SELECT id FROM users WHERE role = 'admin'").fetchall()
+                for admin in admins:
+                    conn.execute(
+                        "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (str(uuid.uuid4()), admin["id"], "⚠️ 工单超期督办", f"工单（{dorm_building} {dorm_room}，优先级: {priority}）已超期，需要您的介入督办。", "sla_breached", repair_id, 0, now_str)
+                    )
+                
+                # 自动在工单管理员备注中记录
+                new_admin_note = "[⚠️ SLA超期警报] 该工单已超时未解决，自动提醒管理员干预。"
+                if admin_note:
+                    updated_note = f"{new_admin_note}\n{admin_note}"
+                else:
+                    updated_note = new_admin_note
+                conn.execute("UPDATE repairs SET adminNote = ? WHERE id = ?", (updated_note, repair_id))
+                conn.commit()
+                print(f"[SLA Compliance] Repair {repair_id} breached SLA. Sent notifications.")
+                
+            # (B) 即将超期警告 (剩余时间少于 20% 且大于 0 且之前未发过该工单的超期预警通知)
+            elif 0 < remaining_sec <= warning_threshold:
+                # 检查是否已发送过 warning 通知
+                already_warned = conn.execute(
+                    "SELECT COUNT(*) FROM notifications WHERE relatedId = ? AND type = 'sla_warning'",
+                    (repair_id,)
+                ).fetchone()[0]
+                
+                if already_warned == 0:
+                    # 发送预警通知
+                    # 1. 如果有分配人，提醒该维修工
+                    if assigned_to:
+                        conn.execute(
+                            "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (str(uuid.uuid4()), assigned_to, "⏳ 任务即将超期", f"您的任务（{dorm_building} {dorm_room}）即将超时（剩余 {int(remaining_sec / 60)} 分钟），请尽快处理！", "sla_warning", repair_id, 0, now_str)
+                        )
+                    else:
+                        # 2. 如果是 pending，提醒管理员分配
+                        admins = conn.execute("SELECT id FROM users WHERE role = 'admin'").fetchall()
+                        for admin in admins:
+                            conn.execute(
+                                "INSERT INTO notifications (id, userId, title, message, type, relatedId, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (str(uuid.uuid4()), admin["id"], "⏳ 待办任务即将超时", f"工单（{dorm_building} {dorm_room}）即将超时（剩余 {int(remaining_sec / 60)} 分钟）且尚未分配，请尽快处理！", "sla_warning", repair_id, 0, now_str)
+                            )
+                    conn.commit()
+                    print(f"[SLA Compliance] Repair {repair_id} warning threshold reached. Sent alert notifications.")
+    except Exception as e:
+        print(f"[SLA Compliance] Error in check_sla_compliance: {e}")
+    finally:
+        conn.close()
+
+async def check_sla_compliance_loop():
+    """定期检测工单 SLA 的异步循环（每分钟检查一次）"""
+    # 刚启动时等待 10 秒以避开系统初始化的开销
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await check_sla_compliance()
+        except Exception as e:
+            print(f"[SLA Loop] Error: {e}")
+        await asyncio.sleep(60)
+
+
 @app.on_event("startup")
 def on_startup():
     db_existed = os.path.exists(DB_PATH)
@@ -267,6 +476,10 @@ def on_startup():
         print("数据库已重置，请重新开始注册第一个账号。")
     else:
         print(f"数据库已就绪：{DB_PATH}")
+    
+    # 启动后台异步任务
+    asyncio.create_task(check_sla_compliance_loop())
+
 
 # ─── Pydantic Models ────────────────────────────────────────────────────────────
 class SignupRequest(BaseModel):
@@ -294,12 +507,31 @@ class CreateRepairRequest(BaseModel):
     imageUrl: Optional[str] = None
 
 
+class PartCreateRequest(BaseModel):
+    name: str
+    price: float
+    stock: int
+
+
+class PartUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    stock: Optional[int] = None
+
+
+class PartUsage(BaseModel):
+    partId: str
+    quantity: int
+
+
 class UpdateRepairStatus(BaseModel):
     status: Optional[str] = None
     assignedTo: Optional[str] = None
     adminNote: Optional[str] = None
     workNote: Optional[str] = None
     priority: Optional[str] = None
+    partsUsed: Optional[list[PartUsage]] = None
+
 
 
 class UpdateProfileRequest(BaseModel):
@@ -331,6 +563,34 @@ class CreateAnnouncementRequest(BaseModel):
 class UpdateSkillsRequest(BaseModel):
     skills: str
 
+
+class AIConfigCreateRequest(BaseModel):
+    name: str
+    provider: str
+    apiKey: Optional[str] = ""
+    baseUrl: Optional[str] = ""
+    model: Optional[str] = ""
+    systemPrompt: Optional[str] = ""
+    isActive: Optional[bool] = False
+
+
+class AIConfigUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    provider: Optional[str] = None
+    apiKey: Optional[str] = None
+    baseUrl: Optional[str] = None
+    model: Optional[str] = None
+    systemPrompt: Optional[str] = None
+    isActive: Optional[bool] = None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AIChatRequest(BaseModel):
+    messages: list[ChatMessage]
 
 
 # ─── Auth Endpoints ─────────────────────────────────────────────────────────────
@@ -693,6 +953,7 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
 async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, current_user: dict = Depends(verify_token)):
     role = current_user.get("role", "student")
     user_id = current_user.get("userId", "")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
 
     conn = get_db()
     try:
@@ -713,6 +974,25 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
                 if not payload.workNote or len(payload.workNote.strip()) < 5:
                     raise HTTPException(status_code=400, detail="完成维修时必须填写至少5个字的维修记录(workNote)")
                 payload.status = "pending_evaluation"
+                
+                # 处理零部件备件扣除与使用记录录入
+                if payload.partsUsed:
+                    for item in payload.partsUsed:
+                        part = conn.execute("SELECT * FROM parts WHERE id = ?", (item.partId,)).fetchone()
+                        if not part:
+                            raise HTTPException(status_code=400, detail="所选配件不存在")
+                        if part["stock"] < item.quantity:
+                            raise HTTPException(status_code=400, detail=f"配件 {part['name']} 库存不足（当前库存 {part['stock']}）")
+                        
+                        # 扣减库存
+                        conn.execute("UPDATE parts SET stock = stock - ? WHERE id = ?", (item.quantity, item.partId))
+                        # 写入消费记录明细
+                        part_usage_id = str(uuid.uuid4())
+                        conn.execute(
+                            "INSERT INTO repair_parts (id, repairId, partId, quantity, price, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+                            (part_usage_id, repair_id, item.partId, item.quantity, part["price"], now)
+                        )
+
 
         # Admin validations
         if role == "admin" and payload.status:
@@ -734,8 +1014,6 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
                 current_label = STATUS_LABELS.get(existing["status"], existing["status"])
                 target_label = STATUS_LABELS.get(payload.status, payload.status)
                 raise HTTPException(status_code=400, detail=f"管理员无法将工单从 {current_label} 直接更改为 {target_label}")
-
-        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
         updates = []
         values = []
 
@@ -887,6 +1165,21 @@ async def get_stats(current_user: dict = Depends(verify_token)):
         """
         avg_resp_row = conn.execute(avg_response_query).fetchone()
         avg_response_time = avg_resp_row["avg_hours"] if avg_resp_row and avg_resp_row["avg_hours"] else 0
+        
+        # 统计物料消耗总开销
+        total_cost_row = conn.execute("SELECT SUM(rp.quantity * rp.price) FROM repair_parts rp").fetchone()
+        total_cost = total_cost_row[0] if total_cost_row and total_cost_row[0] is not None else 0
+        
+        # 统计最常消耗的前5种备件排行
+        parts_consumed_rows = conn.execute("""
+            SELECT p.name, SUM(rp.quantity) as count, SUM(rp.quantity * rp.price) as totalCost
+            FROM repair_parts rp
+            LEFT JOIN parts p ON rp.partId = p.id
+            GROUP BY rp.partId
+            ORDER BY count DESC
+            LIMIT 5
+        """).fetchall()
+        parts_consumed_stats = [{"name": r["name"] or "已删备件", "count": r["count"], "totalCost": float(f"{r['totalCost']:.2f}")} for r in parts_consumed_rows]
     finally:
         conn.close()
 
@@ -907,8 +1200,101 @@ async def get_stats(current_user: dict = Depends(verify_token)):
             "trendData": trend_data,
             "slaComplianceRate": float(f"{sla_compliance_rate:.4f}"),
             "averageResponseTimeHours": float(f"{avg_response_time:.2f}"),
+            "totalCost": float(f"{total_cost:.2f}"),
+            "partsConsumedStats": parts_consumed_stats,
         },
     }
+
+
+# ─── Parts Endpoints ─────────────────────────────────────────────────────────────
+@app.get("/api/parts")
+async def get_parts(current_user: dict = Depends(verify_token)):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM parts ORDER BY createdAt DESC").fetchall()
+    finally:
+        conn.close()
+    return {"success": True, "data": [dict(r) for r in rows]}
+
+
+@app.post("/api/parts")
+async def create_part(payload: PartCreateRequest, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        part_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        conn.execute(
+            "INSERT INTO parts (id, name, price, stock, createdAt) VALUES (?, ?, ?, ?, ?)",
+            (part_id, payload.name, payload.price, payload.stock, now)
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+    finally:
+        conn.close()
+    return {"success": True, "data": dict(row)}
+
+
+@app.patch("/api/parts/{part_id}")
+async def update_part(part_id: str, payload: PartUpdateRequest, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="备品备件不存在")
+            
+        updates = []
+        values = []
+        if payload.name is not None:
+            updates.append("name = ?")
+            values.append(payload.name)
+        if payload.price is not None:
+            updates.append("price = ?")
+            values.append(payload.price)
+        if payload.stock is not None:
+            updates.append("stock = ?")
+            values.append(payload.stock)
+            
+        if not updates:
+            raise HTTPException(status_code=400, detail="未提供修改字段")
+            
+        values.append(part_id)
+        conn.execute(f"UPDATE parts SET {', '.join(updates)} WHERE id = ?", values)
+        conn.commit()
+        row = conn.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+    finally:
+        conn.close()
+    return {"success": True, "data": dict(row)}
+
+
+@app.delete("/api/parts/{part_id}")
+async def delete_part(part_id: str, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="备品备件不存在")
+        conn.execute("DELETE FROM parts WHERE id = ?", (part_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "删除成功"}
+
+
+@app.get("/api/repairs/{repair_id}/parts")
+async def get_repair_parts(repair_id: str, current_user: dict = Depends(verify_token)):
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT rp.*, p.name as partName
+            FROM repair_parts rp
+            LEFT JOIN parts p ON rp.partId = p.id
+            WHERE rp.repairId = ?
+            ORDER BY rp.createdAt ASC
+        """, (repair_id,)).fetchall()
+    finally:
+        conn.close()
+    return {"success": True, "data": [dict(r) for r in rows]}
+
 
 
 # ─── User Endpoints ─────────────────────────────────────────────────────────────
@@ -1389,4 +1775,249 @@ async def export_repairs(current_user: dict = Depends(require_admin)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=repairs_export.csv"}
     )
+
+
+# ─── AI Config and Assistant Chat Endpoints ─────────────────────────────────────────
+
+def mask_api_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "*" * len(key)
+    return f"{key[:4]}...{key[-4:]}"
+
+@app.get("/api/admin/ai-configs")
+async def get_ai_configs(current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM ai_configs ORDER BY createdAt DESC").fetchall()
+        configs = []
+        for r in rows:
+            d = dict(r)
+            d["apiKey"] = mask_api_key(d["apiKey"])
+            configs.append(d)
+    finally:
+        conn.close()
+    return {"success": True, "data": configs}
+
+@app.post("/api/admin/ai-configs")
+async def create_ai_config(payload: AIConfigCreateRequest, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        config_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        is_active_val = 1 if payload.isActive else 0
+        
+        if is_active_val == 1:
+            conn.execute("UPDATE ai_configs SET isActive = 0")
+            
+        conn.execute("""
+            INSERT INTO ai_configs (id, name, provider, apiKey, baseUrl, model, systemPrompt, isActive, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            config_id, payload.name, payload.provider, payload.apiKey, 
+            payload.baseUrl, payload.model, payload.systemPrompt, is_active_val,
+            now, now
+        ))
+        conn.commit()
+        row = conn.execute("SELECT * FROM ai_configs WHERE id = ?", (config_id,)).fetchone()
+        d = dict(row)
+        d["apiKey"] = mask_api_key(d["apiKey"])
+    finally:
+        conn.close()
+    return {"success": True, "data": d}
+
+@app.patch("/api/admin/ai-configs/{config_id}")
+async def update_ai_config(config_id: str, payload: AIConfigUpdateRequest, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT * FROM ai_configs WHERE id = ?", (config_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="AI配置预设不存在")
+            
+        updates = []
+        values = []
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        
+        if payload.name is not None:
+            updates.append("name = ?")
+            values.append(payload.name)
+        if payload.provider is not None:
+            updates.append("provider = ?")
+            values.append(payload.provider)
+        if payload.apiKey is not None:
+            updates.append("apiKey = ?")
+            values.append(payload.apiKey)
+        if payload.baseUrl is not None:
+            updates.append("baseUrl = ?")
+            values.append(payload.baseUrl)
+        if payload.model is not None:
+            updates.append("model = ?")
+            values.append(payload.model)
+        if payload.systemPrompt is not None:
+            updates.append("systemPrompt = ?")
+            values.append(payload.systemPrompt)
+            
+        if payload.isActive is not None:
+            is_active_val = 1 if payload.isActive else 0
+            if is_active_val == 1:
+                conn.execute("UPDATE ai_configs SET isActive = 0")
+            updates.append("isActive = ?")
+            values.append(is_active_val)
+            
+        updates.append("updatedAt = ?")
+        values.append(now)
+        values.append(config_id)
+        
+        conn.execute(f"UPDATE ai_configs SET {', '.join(updates)} WHERE id = ?", values)
+        conn.commit()
+        
+        row = conn.execute("SELECT * FROM ai_configs WHERE id = ?", (config_id,)).fetchone()
+        d = dict(row)
+        d["apiKey"] = mask_api_key(d["apiKey"])
+    finally:
+        conn.close()
+    return {"success": True, "data": d}
+
+@app.delete("/api/admin/ai-configs/{config_id}")
+async def delete_ai_config(config_id: str, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT * FROM ai_configs WHERE id = ?", (config_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="AI配置预设不存在")
+        conn.execute("DELETE FROM ai_configs WHERE id = ?", (config_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "配置已成功删除"}
+
+@app.post("/api/admin/ai-configs/test")
+async def test_ai_config(payload: AIConfigCreateRequest, current_user: dict = Depends(require_admin)):
+    if payload.provider == "simulation":
+        return {"success": True, "message": "模拟引擎测试成功！宿宝已准备就绪。"}
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            if payload.provider == "ollama":
+                url = f"{payload.baseUrl}/api/chat" if payload.baseUrl else "http://localhost:11434/api/chat"
+                res = await client.post(
+                    url,
+                    json={
+                        "model": payload.model or "llama3",
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False
+                    },
+                    timeout=5.0
+                )
+                if res.status_code == 200:
+                    return {"success": True, "message": f"Ollama 引擎连接成功！模型: {payload.model}"}
+                else:
+                    raise HTTPException(status_code=400, detail=f"Ollama 返回错误 (状态码 {res.status_code}): {res.text}")
+            else:
+                # OpenAI, DeepSeek, Xiaomi or other custom OpenAI compatibles
+                url = f"{payload.baseUrl}/chat/completions"
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if payload.apiKey:
+                    headers["Authorization"] = f"Bearer {payload.apiKey}"
+                    
+                body = {
+                    "model": payload.model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 5
+                }
+                res = await client.post(url, json=body, headers=headers, timeout=5.0)
+                if res.status_code == 200:
+                    return {"success": True, "message": f"大模型接口测试成功！模型: {payload.model}"}
+                else:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"success": False, "detail": f"模型接口返回错误 (状态码 {res.status_code}): {res.text}"}
+                    )
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "detail": f"测试连接异常: {str(e)}"}
+        )
+
+@app.post("/api/chat")
+async def chat_with_assistant(payload: AIChatRequest, current_user: dict = Depends(verify_token)):
+    conn = get_db()
+    active_config = None
+    try:
+        row = conn.execute("SELECT * FROM ai_configs WHERE isActive = 1 LIMIT 1").fetchone()
+        if row:
+            active_config = dict(row)
+    finally:
+        conn.close()
+        
+    provider = active_config["provider"] if active_config else "simulation"
+    system_prompt = active_config["systemPrompt"] if active_config else "你是一个可爱的宿舍生活助手，名字叫'宿宝'。请用温柔和善的语气解答学校宿舍生活、报修规范、维修指引相关的问题。"
+    model = active_config["model"] if active_config else "simulation-model"
+    api_key = active_config["apiKey"] if active_config else ""
+    base_url = active_config["baseUrl"] if active_config else ""
+    
+    api_messages = []
+    if system_prompt:
+        api_messages.append({"role": "system", "content": system_prompt})
+    
+    for msg in payload.messages[-10:]:
+        api_messages.append({"role": msg.role, "content": msg.content})
+        
+    if provider == "simulation":
+        last_user_msg = payload.messages[-1].content if payload.messages else ""
+        
+        reply = "宿宝收到啦！这是一个模拟引擎的回复。等管理员配置了正式的 API Key（如小米 API 或 DeepSeek）后，宿宝就可以回答各种好玩的生活问题啦！"
+        if "断电" in last_user_msg or "停电" in last_user_msg or "没电" in last_user_msg:
+            reply = "💡 **宿宝提示：宿舍用电指引**\n\n如果宿舍突然停电，请按照以下步骤排查：\n1. 检查是否只有你宿舍停电，如果是，可能是负荷过大导致跳闸，可查看宿舍门口配电箱的空气开关是否跳开。\n2. 检查校园网/公众号缴费系统，确认电费是否已经用完，如果是，请及时充值，充值后系统一般会在5分钟内自动送电。\n3. 如果以上均正常，请在宿舍管理系统提交“用电类”报修工单，维修师傅会尽快上门协助！"
+        elif "水" in last_user_msg or "漏水" in last_user_msg or "堵塞" in last_user_msg:
+            reply = "💧 **宿宝提示：水暖管道紧急处理**\n\n1. **水管爆裂/严重漏水**：请迅速关闭洗手池或卫生间下方的三角阀以切断水源，并提交“加急/紧急”报修单，同时可以电话联系楼栋宿管阿姨安排值班师傅。\n2. **下水道堵塞**：请尽量避免继续用水防止溢水，提交报修工单，并在备注中写明是否需要专用疏通工具。"
+        elif "密码" in last_user_msg or "修改密码" in last_user_msg:
+            reply = "🔒 **宿宝提示：密码管理**\n\n如果您需要修改密码：\n1. 点击左侧导航栏的 **“个人中心”**。\n2. 在页面中找到 **“修改密码”** 面板。\n3. 输入您的旧密码及新密码，点击保存即可。\n\n如果忘记密码，请联系宿管老师（系统管理员）进行后台密码重置。"
+        elif "报修" in last_user_msg or "如何报修" in last_user_msg:
+            reply = "🛠️ **宿宝提示：如何提交报修单**\n\n1. 在页面左侧点击 **“报修管理”** 页面。\n2. 点击顶部的 **“申请报修”** 按钮。\n3. 填写真实的楼栋、宿舍号，选择故障分类并填写详细描述（建议上传故障照片方便师傅带齐工具）。\n4. 点击提交后，系统将自动分配师傅为您维修，请保持电话畅通！"
+        elif "你好" in last_user_msg or "你是谁" in last_user_msg:
+            reply = "你好呀！我是宿舍小管家 **「宿宝」** 🤖✨。有什么关于宿舍报修、起居缴费或生活指南的问题，都可以随时问我哦！"
+            
+        return {"success": True, "data": {"reply": reply}}
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            if provider == "ollama":
+                url = f"{base_url}/api/chat" if base_url else "http://localhost:11434/api/chat"
+                res = await client.post(
+                    url,
+                    json={
+                        "model": model or "llama3",
+                        "messages": api_messages,
+                        "stream": False
+                    },
+                    timeout=30.0
+                )
+                if res.status_code == 200:
+                    reply = res.json()["message"]["content"]
+                    return {"success": True, "data": {"reply": reply}}
+                else:
+                    return {"success": False, "detail": f"Ollama 服务返回异常: {res.status_code}"}
+            else:
+                url = f"{base_url}/chat/completions"
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                body = {
+                    "model": model,
+                    "messages": api_messages
+                }
+                res = await client.post(url, json=body, headers=headers, timeout=30.0)
+                if res.status_code == 200:
+                    reply = res.json()["choices"][0]["message"]["content"]
+                    return {"success": True, "data": {"reply": reply}}
+                else:
+                    return {"success": False, "detail": f"大模型接口调用失败 (代码 {res.status_code}): {res.text}"}
+    except Exception as e:
+        return {"success": False, "detail": f"AI 服务响应错误: {str(e)}"}
 

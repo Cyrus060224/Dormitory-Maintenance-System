@@ -81,6 +81,26 @@ export interface Stats {
   trendData?: { date: string; count: number }[];
   slaComplianceRate?: number;
   averageResponseTimeHours?: number;
+  totalCost?: number;
+  partsConsumedStats?: { name: string; count: number; totalCost: number }[];
+}
+
+export interface Part {
+  id: string;
+  name: string;
+  price: number;
+  stock: number;
+  createdAt: string;
+}
+
+export interface RepairPart {
+  id: string;
+  repairId: string;
+  partId: string;
+  quantity: number;
+  price: number;
+  partName?: string;
+  createdAt: string;
 }
 
 export interface Comment {
@@ -123,4 +143,22 @@ export interface PaginatedApiResponse<T> extends ApiResponse<T> {
   total: number;
   page?: number;
   pageSize?: number;
+}
+
+export interface AIConfig {
+  id: string;
+  name: string;
+  provider: 'simulation' | 'xiaomi' | 'openai' | 'deepseek' | 'ollama' | 'custom';
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  systemPrompt?: string;
+  isActive: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }

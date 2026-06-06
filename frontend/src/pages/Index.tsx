@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { RepairRequest, User, Stats, ApiResponse, PaginatedApiResponse } from '../types';
+import { RepairRequest, User, Stats, ApiResponse, PaginatedApiResponse, Part, RepairPart, AIConfig, ChatMessage } from '../types';
 import { toast } from 'sonner';
+
 import {
   Wrench, Home, ClipboardList, BarChart2, Users, LogOut,
   Plus, Star, CheckCircle, Clock,
   ChevronRight, RefreshCw, Send, Eye, Shield, Lock, Phone,
-  Sparkles, AlertTriangle
+  Sparkles, AlertTriangle, Bot, MessageSquare, Trash2, Edit2, Play, Check, X
 } from 'lucide-react';
 import { API, authFetch, readApiMessage } from '../lib/api';
 import EvaluationModal from '../components/custom/EvaluationModal';
@@ -111,7 +112,739 @@ function SlaBadge({ slaDueDate, status }: { slaDueDate?: string; status: string 
   );
 }
 
+interface ConsumedPartsListProps {
+  repairId: string;
+  token: string | null;
+  status: string;
+}
+
+function ConsumedPartsList({ repairId, token, status }: ConsumedPartsListProps) {
+  const [parts, setParts] = useState<RepairPart[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadParts = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await authFetch(API.PARTS.REPAIR_PARTS(repairId), token);
+      const data = await res.json() as ApiResponse<RepairPart[]>;
+      if (data.success) {
+        setParts(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load consumed parts:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [repairId, token]);
+
+  useEffect(() => {
+    if (['completed', 'pending_evaluation', 'closed'].includes(status)) {
+      loadParts();
+    } else {
+      setParts([]);
+    }
+  }, [repairId, status, loadParts]);
+
+  if (parts.length === 0) return null;
+
+  const totalCost = parts.reduce((acc, p) => acc + p.quantity * p.price, 0);
+
+  return (
+    <div className="border-t border-border pt-4">
+      <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+        🔧 消耗配件物料明细
+      </p>
+      <div className="bg-muted/30 border border-border rounded-xl p-3 space-y-2">
+        <div className="divide-y divide-border">
+          {parts.map((p) => (
+            <div key={p.id} className="py-1.5 flex justify-between text-xs text-muted-foreground">
+              <span>{p.partName || '已删配件'} x {p.quantity}</span>
+              <span className="font-semibold text-foreground">￥{(p.quantity * p.price).toFixed(2)} <span className="text-[10px] text-muted-foreground font-normal">(￥{p.price}/件)</span></span>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border/60 pt-2 flex justify-between text-xs font-bold text-foreground">
+          <span>物料总计</span>
+          <span className="text-primary text-sm">￥{totalCost.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminPartsTab({ token }: { token: string | null }) {
+  const [parts, setParts] = useState<Part[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPart, setEditingPart] = useState<Part | null>(null);
+  const [form, setForm] = useState({ name: '', price: '', stock: '' });
+
+  const loadParts = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await authFetch(API.PARTS.LIST, token);
+      const data = await res.json() as ApiResponse<Part[]>;
+      if (data.success) setParts(data.data);
+    } catch {
+      toast.error('加载备件失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadParts();
+  }, [loadParts]);
+
+  const handleOpenAdd = () => {
+    setEditingPart(null);
+    setForm({ name: '', price: '', stock: '' });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (part: Part) => {
+    setEditingPart(part);
+    setForm({ name: part.name, price: String(part.price), stock: String(part.stock) });
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.price || !form.stock) {
+      toast.error('请填写完整信息');
+      return;
+    }
+    const priceNum = parseFloat(form.price);
+    const stockNum = parseInt(form.stock);
+    if (isNaN(priceNum) || priceNum < 0) {
+      toast.error('单价必须是有效数字');
+      return;
+    }
+    if (isNaN(stockNum) || stockNum < 0) {
+      toast.error('库存数必须是整数');
+      return;
+    }
+
+    try {
+      if (editingPart) {
+        const res = await authFetch(API.PARTS.UPDATE(editingPart.id), token, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: form.name, price: priceNum, stock: stockNum }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast.success('更新成功');
+          setIsModalOpen(false);
+          loadParts();
+        } else {
+          toast.error(data.message || '更新失败');
+        }
+      } else {
+        const res = await authFetch(API.PARTS.CREATE, token, {
+          method: 'POST',
+          body: JSON.stringify({ name: form.name, price: priceNum, stock: stockNum }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast.success('添加成功');
+          setIsModalOpen(false);
+          loadParts();
+        } else {
+          toast.error(data.message || '添加失败');
+        }
+      }
+    } catch {
+      toast.error('网络错误');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定要删除该备件吗？这不会影响历史消耗记录，但以后将无法选择。')) return;
+    try {
+      const res = await authFetch(API.PARTS.DELETE(id), token, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('删除成功');
+        loadParts();
+      } else {
+        toast.error(data.message || '删除失败');
+      }
+    } catch {
+      toast.error('网络错误');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-semibold text-foreground">备品备件库存列表</h3>
+        <button
+          onClick={handleOpenAdd}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition hover:scale-105 active:scale-95 duration-200"
+        >
+          <Plus className="w-4 h-4" /> 添加配件
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <RefreshCw className="w-6 h-6 text-muted-foreground animate-spin" />
+        </div>
+      ) : parts.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-border p-12 text-center text-muted-foreground">
+          暂无配件，请先添加备品备件以供报修使用。
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-border overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="bg-muted/30 border-b border-border text-muted-foreground font-medium">
+                  <th className="p-4">名称</th>
+                  <th className="p-4">单价</th>
+                  <th className="p-4">当前库存</th>
+                  <th className="p-4">创建时间</th>
+                  <th className="p-4 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {parts.map((part) => (
+                  <tr key={part.id} className="hover:bg-muted/10">
+                    <td className="p-4 font-semibold text-foreground">{part.name}</td>
+                    <td className="p-4 text-primary font-medium">￥{part.price.toFixed(2)}</td>
+                    <td className="p-4">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        part.stock === 0 ? 'bg-red-50 text-red-700 border border-red-100' :
+                        part.stock < 5 ? 'bg-amber-50 text-amber-700 border border-amber-100 animate-pulse' :
+                        'bg-green-50 text-green-700 border border-green-100'
+                      }`}>
+                        {part.stock} 件
+                      </span>
+                    </td>
+                    <td className="p-4 text-muted-foreground text-xs">{new Date(part.createdAt).toLocaleDateString()}</td>
+                    <td className="p-4 text-right space-x-2 text-xs">
+                      <button
+                        onClick={() => handleOpenEdit(part)}
+                        className="text-primary hover:underline font-bold"
+                      >
+                        编辑/补库
+                      </button>
+                      <button
+                        onClick={() => handleDelete(part.id)}
+                        className="text-red-500 hover:underline font-bold"
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-200">
+            <h4 className="text-lg font-bold mb-4">{editingPart ? '编辑备品备件' : '添加备品备件'}</h4>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">配件名称</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="如：LED灯管、水龙头阀芯"
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">单价 (元)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.price}
+                    onChange={(e) => setForm(p => ({ ...p, price: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">库存数量</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.stock}
+                    onChange={(e) => setForm(p => ({ ...p, stock: e.target.value }))}
+                    placeholder="0"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition"
+                >
+                  确认
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function AdminAIConfigsTab({ token }: { token: string | null }) {
+  const [configs, setConfigs] = useState<AIConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingConfig, setEditingConfig] = useState<AIConfig | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    provider: 'simulation' as AIConfig['provider'],
+    apiKey: '',
+    baseUrl: '',
+    model: '',
+    systemPrompt: '',
+    isActive: false
+  });
+
+  const loadConfigs = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await authFetch(API.AI.CONFIG_LIST, token);
+      const data = await res.json() as ApiResponse<AIConfig[]>;
+      if (data.success) setConfigs(data.data);
+    } catch {
+      toast.error('加载AI配置失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadConfigs();
+  }, [loadConfigs]);
+
+  const handleProviderChange = (provider: AIConfig['provider']) => {
+    let baseUrl = '';
+    let model = '';
+    let systemPrompt = form.systemPrompt || '你是一个可爱的宿舍生活助手，名字叫\'宿宝\'。请用温柔和善的语气解答学校宿舍生活、报修规范、维修指引相关的问题。';
+    
+    if (provider === 'openai') {
+      baseUrl = 'https://api.openai.com/v1';
+      model = 'gpt-4o-mini';
+    } else if (provider === 'deepseek') {
+      baseUrl = 'https://api.deepseek.com/v1';
+      model = 'deepseek-chat';
+    } else if (provider === 'ollama') {
+      baseUrl = 'http://localhost:11434';
+      model = 'llama3';
+    } else if (provider === 'xiaomi') {
+      baseUrl = 'https://api.xiaoai.mi.com/v1';
+      model = 'xiaomi-model';
+    } else if (provider === 'simulation') {
+      baseUrl = '';
+      model = 'simulation-model';
+    }
+
+    setForm(prev => ({
+      ...prev,
+      provider,
+      baseUrl,
+      model,
+      systemPrompt
+    }));
+  };
+
+  const handleOpenAdd = () => {
+    setEditingConfig(null);
+    setForm({
+      name: '',
+      provider: 'simulation',
+      apiKey: '',
+      baseUrl: '',
+      model: 'simulation-model',
+      systemPrompt: '你是一个可爱的宿舍生活助手，名字叫\'宿宝\'。请用温柔和善的语气解答学校宿舍生活、报修规范、维修指引相关的问题。',
+      isActive: false
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (cfg: AIConfig) => {
+    setEditingConfig(cfg);
+    setForm({
+      name: cfg.name,
+      provider: cfg.provider,
+      apiKey: cfg.apiKey || '',
+      baseUrl: cfg.baseUrl || '',
+      model: cfg.model || '',
+      systemPrompt: cfg.systemPrompt || '',
+      isActive: cfg.isActive === 1
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleTestConnection = async () => {
+    if (!form.provider) return;
+    setTesting(true);
+    try {
+      const res = await authFetch(API.AI.CONFIG_TEST, token, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.name || 'Test',
+          provider: form.provider,
+          apiKey: form.apiKey,
+          baseUrl: form.baseUrl,
+          model: form.model,
+          systemPrompt: form.systemPrompt,
+          isActive: form.isActive
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || '连接测试成功！');
+      } else {
+        toast.error(data.detail || '连接测试失败');
+      }
+    } catch {
+      toast.error('网络连接错误');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.provider) {
+      toast.error('请填写名称并选择引擎服务商');
+      return;
+    }
+
+    try {
+      const payload = {
+        name: form.name,
+        provider: form.provider,
+        apiKey: form.apiKey,
+        baseUrl: form.baseUrl,
+        model: form.model,
+        systemPrompt: form.systemPrompt,
+        isActive: form.isActive
+      };
+
+      let res;
+      if (editingConfig) {
+        res = await authFetch(API.AI.CONFIG_UPDATE(editingConfig.id), token, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        res = await authFetch(API.AI.CONFIG_CREATE, token, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
+      
+      const data = await res.json();
+      if (data.success) {
+        toast.success(editingConfig ? '保存配置成功' : '创建配置成功');
+        setIsModalOpen(false);
+        loadConfigs();
+      } else {
+        toast.error(data.message || '保存失败');
+      }
+    } catch {
+      toast.error('保存配置发生网络错误');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定要删除该AI配置吗？')) return;
+    try {
+      const res = await authFetch(API.AI.CONFIG_DELETE(id), token, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('删除成功');
+        loadConfigs();
+      } else {
+        toast.error(data.message || '删除失败');
+      }
+    } catch {
+      toast.error('删除配置失败，网络错误');
+    }
+  };
+
+  const handleSetActive = async (cfg: AIConfig) => {
+    try {
+      const res = await authFetch(API.AI.CONFIG_UPDATE(cfg.id), token, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: true })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`已启用引擎: ${cfg.name}`);
+        loadConfigs();
+      } else {
+        toast.error(data.message || '启用失败');
+      }
+    } catch {
+      toast.error('启用引擎发生网络错误');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-semibold text-foreground">AI 智能助手「宿宝」引擎配置</h3>
+        <button
+          onClick={handleOpenAdd}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition hover:scale-105 active:scale-95 duration-200"
+        >
+          <Plus className="w-4 h-4" /> 新增 AI 引擎
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <RefreshCw className="w-6 h-6 text-muted-foreground animate-spin" />
+        </div>
+      ) : configs.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-border p-12 text-center text-muted-foreground">
+          暂无 AI 引擎配置，请先添加配置预设。
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {configs.map((cfg) => (
+            <div key={cfg.id} className={`bg-white rounded-2xl border p-5 shadow-sm transition duration-300 hover:shadow-md ${cfg.isActive === 1 ? 'border-primary border-2' : 'border-border'}`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-foreground text-lg">{cfg.name}</h4>
+                    {cfg.isActive === 1 && (
+                      <span className="px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full text-xs font-semibold flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> 激活中
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">服务商: <span className="font-semibold text-foreground uppercase">{cfg.provider}</span></p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleOpenEdit(cfg)}
+                    className="p-2 hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground transition"
+                    title="编辑"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(cfg.id)}
+                    className="p-2 hover:bg-red-50 rounded-lg text-muted-foreground hover:text-red-500 transition"
+                    title="删除"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2 text-sm border-t border-muted/50 pt-3">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">模型名称:</span>
+                  <span className="font-medium text-foreground">{cfg.model || '未设定'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">接口地址:</span>
+                  <span className="font-medium text-foreground truncate max-w-[200px]" title={cfg.baseUrl}>{cfg.baseUrl || '无 (本地/模拟)'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">API Key:</span>
+                  <span className="font-medium text-foreground text-xs">{cfg.apiKey || '无'}</span>
+                </div>
+              </div>
+
+              {cfg.isActive !== 1 && (
+                <div className="mt-4 pt-3 border-t border-muted/50 flex justify-end">
+                  <button
+                    onClick={() => handleSetActive(cfg)}
+                    className="px-3.5 py-1.5 bg-muted hover:bg-primary hover:text-primary-foreground text-foreground rounded-lg text-xs font-semibold transition"
+                  >
+                    启用该引擎
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
+          <div className="relative bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-border flex justify-between items-center bg-muted/20">
+              <h3 className="text-lg font-bold text-foreground">
+                {editingConfig ? '编辑 AI 引擎配置' : '添加 AI 引擎配置'}
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-1 hover:bg-muted rounded-full transition">
+                <X className="w-5 h-5 text-muted-foreground" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground">配置名称</label>
+                  <input
+                    type="text"
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="如：小米大模型配置"
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground">引擎服务商</label>
+                  <select
+                    value={form.provider}
+                    onChange={(e) => handleProviderChange(e.target.value as AIConfig['provider'])}
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  >
+                    <option value="simulation">模拟对话引擎 (本地开发)</option>
+                    <option value="xiaomi">Xiaomi (小米 API)</option>
+                    <option value="openai">OpenAI (ChatGPT)</option>
+                    <option value="deepseek">DeepSeek (深度求索)</option>
+                    <option value="ollama">Ollama (本地部署LLM)</option>
+                    <option value="custom">Custom (自定义OpenAI兼容型)</option>
+                  </select>
+                </div>
+              </div>
+
+              {form.provider !== 'simulation' && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-muted-foreground">接口基础 URL (Base URL)</label>
+                      <input
+                        type="text"
+                        value={form.baseUrl}
+                        onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+                        placeholder="e.g. https://api.openai.com/v1"
+                        className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-muted-foreground">模型名称 (Model)</label>
+                      <input
+                        type="text"
+                        value={form.model}
+                        onChange={(e) => setForm({ ...form, model: e.target.value })}
+                        placeholder="e.g. gpt-4o-mini"
+                        className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-muted-foreground">API Key (API密钥)</label>
+                    <input
+                      type="password"
+                      value={form.apiKey}
+                      onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+                      placeholder="如果您不需要修改或无需密钥，可留空"
+                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground">角色设定 Prompt (System Instructions)</label>
+                <textarea
+                  rows={4}
+                  value={form.systemPrompt}
+                  onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
+                  placeholder="设定AI智能助手说话的身份、语气和背景知识。"
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 py-2">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={form.isActive}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                  className="w-4 h-4 text-primary focus:ring-primary border-border rounded transition"
+                />
+                <label htmlFor="isActive" className="text-sm font-medium text-foreground cursor-pointer select-none">
+                  立即启用该配置（将会覆盖当前已激活的 AI 引擎）
+                </label>
+              </div>
+
+              <div className="border-t border-border pt-4 flex justify-between gap-3 text-sm">
+                <button
+                  type="button"
+                  disabled={testing}
+                  onClick={handleTestConnection}
+                  className="px-4 py-2 border border-border text-foreground rounded-xl font-semibold hover:bg-muted transition flex items-center gap-2 active:scale-95 disabled:opacity-55"
+                >
+                  {testing ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                  测试连接
+                </button>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 border border-border text-foreground hover:bg-muted rounded-xl font-semibold transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-primary text-primary-foreground hover:opacity-90 rounded-xl font-semibold transition shadow-sm"
+                  >
+                    保存配置
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Student View ─────────────────────────────────────────────────────────────
+
 function StudentView({ token }: { token: string | null }) {
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [requests, setRequests] = useState<RepairRequest[]>([]);
@@ -425,8 +1158,10 @@ function StudentView({ token }: { token: string | null }) {
               )}
             </div>
           )}
+          <ConsumedPartsList repairId={selected.id} token={token} status={selected.status} />
           <RepairComments repairId={selected.id} token={token} />
         </div>
+
       </div>
     );
   }
@@ -527,6 +1262,10 @@ function TechnicianView({ token }: { token: string | null }) {
   const [updating, setUpdating] = useState(false);
   const [tab, setTab] = useState<'tasks' | 'stats'>('tasks');
 
+  // parts state
+  const [inventoryParts, setInventoryParts] = useState<Part[]>([]);
+  const [selectedParts, setSelectedParts] = useState<{ [partId: string]: number }>({});
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
@@ -538,7 +1277,21 @@ function TechnicianView({ token }: { token: string | null }) {
     finally { setLoading(false); }
   }, [token]);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
+  const loadInventoryParts = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await authFetch(API.PARTS.LIST, token);
+      const data = await res.json() as ApiResponse<Part[]>;
+      if (data.success) setInventoryParts(data.data);
+    } catch (err) {
+      console.error('Failed to load inventory parts:', err);
+    }
+  }, [token]);
+
+  useEffect(() => { 
+    loadTasks(); 
+    loadInventoryParts();
+  }, [loadTasks, loadInventoryParts]);
 
   async function updateTask(taskId: string, status: string) {
     if (status === 'completed' && (!workNote || workNote.trim().length < 5)) {
@@ -547,22 +1300,33 @@ function TechnicianView({ token }: { token: string | null }) {
     }
     setUpdating(true);
     try {
+      const partsUsed = Object.entries(selectedParts)
+        .filter(([_, qty]) => qty > 0)
+        .map(([partId, qty]) => ({ partId, quantity: qty }));
+
       const res = await authFetch(API.REPAIRS.UPDATE_STATUS(taskId), token, {
         method: 'PATCH',
-        body: JSON.stringify({ status, workNote: workNote || undefined }),
+        body: JSON.stringify({ 
+          status, 
+          workNote: workNote || undefined,
+          partsUsed: partsUsed.length > 0 ? partsUsed : undefined
+        }),
       });
       const data = await res.json() as ApiResponse<RepairRequest>;
       if (data.success) {
         toast.success('任务状态已更新');
         setSelected(null);
         setWorkNote('');
+        setSelectedParts({});
         loadTasks();
+        loadInventoryParts();
       } else {
         toast.error(data.message || await readApiMessage(res, '更新失败'));
       }
     } catch { toast.error('网络错误'); }
     finally { setUpdating(false); }
   }
+
 
   const pending = tasks.filter(t => t.status === 'pending' || t.status === 'approved');
   const inProgress = tasks.filter(t => t.status === 'in_progress');
@@ -676,8 +1440,63 @@ function TechnicianView({ token }: { token: string | null }) {
                         <textarea value={workNote} onChange={(e) => setWorkNote(e.target.value)}
                           rows={2} placeholder="填写维修记录（必填，至少5个字）"
                           className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm resize-none" />
+                        
+                        {/* 备件选择器 */}
+                        <div className="bg-muted/30 border border-border rounded-xl p-3">
+                          <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1">
+                            <Wrench className="w-3.5 h-3.5 text-primary" />
+                            登记消耗配件物料（完工时生效，可选）
+                          </p>
+                          {inventoryParts.length === 0 ? (
+                            <p className="text-xs text-muted-foreground text-center py-2">无库存配件备件可用</p>
+                          ) : (
+                            <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                              {inventoryParts.map((part) => {
+                                const currentQty = selectedParts[part.id] || 0;
+                                return (
+                                  <div key={part.id} className="flex items-center justify-between text-xs">
+                                    <div className="flex flex-col">
+                                      <span className="font-medium">{part.name}</span>
+                                      <span className="text-[10px] text-muted-foreground">单价: ￥{part.price.toFixed(2)} | 库存: {part.stock}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (currentQty > 0) {
+                                            setSelectedParts(p => ({ ...p, [part.id]: currentQty - 1 }));
+                                          }
+                                        }}
+                                        disabled={currentQty === 0}
+                                        className="w-5 h-5 rounded border border-border flex items-center justify-center bg-white hover:bg-muted font-bold disabled:opacity-50 select-none"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="w-5 text-center font-bold text-foreground">{currentQty}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (currentQty < part.stock) {
+                                            setSelectedParts(p => ({ ...p, [part.id]: currentQty + 1 }));
+                                          } else {
+                                            toast.error(`不能超过库存剩余数量 (${part.stock})`);
+                                          }
+                                        }}
+                                        disabled={part.stock === 0}
+                                        className="w-5 h-5 rounded border border-border flex items-center justify-center bg-white hover:bg-muted font-bold disabled:opacity-50 select-none"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
                         <div className="flex gap-2">
-                          <button onClick={() => { setSelected(null); setWorkNote(''); }}
+                          <button onClick={() => { setSelected(null); setWorkNote(''); setSelectedParts({}); }}
                             className="flex-1 py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition">取消</button>
                           {(t.status === 'pending' || t.status === 'approved') && (
                             <button onClick={() => updateTask(t.id, 'in_progress')} disabled={updating}
@@ -692,12 +1511,14 @@ function TechnicianView({ token }: { token: string | null }) {
                         </div>
                       </>
                     )}
+                    <ConsumedPartsList repairId={t.id} token={token} status={t.status} />
                     <RepairComments repairId={t.id} token={token} />
-                    <button onClick={() => { setSelected(null); setWorkNote(''); }}
+                    <button onClick={() => { setSelected(null); setWorkNote(''); setSelectedParts({}); }}
                       className="w-full py-2 rounded-xl border border-border text-foreground text-sm hover:bg-muted transition mt-2">
                       收起
                     </button>
                   </div>
+
                 ) : (
                   <button onClick={() => setSelected(t)}
                     className="w-full py-2 rounded-xl border border-primary text-primary text-sm font-medium hover:bg-primary/5 transition">
@@ -760,7 +1581,7 @@ function TechnicianView({ token }: { token: string | null }) {
 
 // ─── Admin View ───────────────────────────────────────────────────────────────
 function AdminView({ token }: { token: string | null }) {
-  const [tab, setTab] = useState<'repairs' | 'stats' | 'users'>('repairs');
+  const [tab, setTab] = useState<'repairs' | 'stats' | 'parts' | 'users' | 'ai'>('repairs');
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [technicians, setTechnicians] = useState<User[]>([]);
@@ -936,7 +1757,8 @@ function AdminView({ token }: { token: string | null }) {
     <div>
       {/* Tabs */}
       <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6">
-        {([['repairs', '报修管理', ClipboardList], ['stats', '数据统计', BarChart2], ['users', '用户管理', Users]] as const).map(([key, label, Icon]) => (
+        {([['repairs', '报修管理', ClipboardList], ['stats', '数据统计', BarChart2], ['parts', '库存管理', Wrench], ['users', '用户管理', Users], ['ai', 'AI助手配置', Bot]] as const).map(([key, label, Icon]) => (
+
           <button key={key} onClick={() => setTab(key)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition ${
               tab === key ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
@@ -1081,6 +1903,7 @@ function AdminView({ token }: { token: string | null }) {
                           {assigning ? '保存中...' : '保存'}
                         </button>
                       </div>
+                      <ConsumedPartsList repairId={r.id} token={token} status={r.status} />
                       <RepairComments repairId={r.id} token={token} />
                     </form>
                   )}
@@ -1097,15 +1920,21 @@ function AdminView({ token }: { token: string | null }) {
         </div>
       )}
 
+      {tab === 'parts' && (
+        <AdminPartsTab token={token} />
+      )}
+
       {/* Stats Tab */}
+
       {tab === 'stats' && stats && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-3">
             {[
               { label: '总报修数', value: stats.totalRequests, color: 'bg-blue-50 text-blue-700', icon: ClipboardList },
               { label: '待处理', value: stats.pendingRequests, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
               { label: '维修中', value: stats.inProgressRequests, color: 'bg-purple-50 text-purple-700', icon: Wrench },
               { label: '已完成', value: stats.completedRequests, color: 'bg-green-50 text-green-700', icon: CheckCircle },
+              { label: '物料开销', value: stats.totalCost !== undefined ? `￥${stats.totalCost.toFixed(2)}` : '￥0.00', color: 'bg-red-50 text-red-700', icon: Wrench },
               { label: 'SLA达标率', value: stats.slaComplianceRate !== undefined ? `${(stats.slaComplianceRate * 100).toFixed(1)}%` : 'N/A', color: 'bg-emerald-50 text-emerald-700', icon: Shield },
               { label: '平均完成耗时', value: stats.averageResponseTimeHours !== undefined ? `${stats.averageResponseTimeHours.toFixed(1)}h` : 'N/A', color: 'bg-indigo-50 text-indigo-700', icon: Clock },
             ].map(({ label, value, color, icon: Icon }) => (
@@ -1116,6 +1945,7 @@ function AdminView({ token }: { token: string | null }) {
               </div>
             ))}
           </div>
+
 
           {stats.trendData && stats.trendData.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
@@ -1235,6 +2065,35 @@ function AdminView({ token }: { token: string | null }) {
               </div>
             </div>
           </div>
+
+          {/* 备件消耗排行统计 */}
+          {stats.partsConsumedStats && stats.partsConsumedStats.length > 0 && (
+            <div className="bg-white rounded-2xl border border-border p-5 shadow-sm">
+              <h4 className="font-semibold text-foreground mb-4 flex items-center gap-1.5">
+                📊 备件消耗及材料成本分析 (Top 5)
+              </h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground font-medium pb-2">
+                      <th className="pb-2">备件名称</th>
+                      <th className="pb-2">消耗总数量</th>
+                      <th className="pb-2 text-right">消耗总成本</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {stats.partsConsumedStats.map((item) => (
+                      <tr key={item.name} className="hover:bg-muted/10">
+                        <td className="py-2.5 font-semibold text-foreground">{item.name}</td>
+                        <td className="py-2.5 text-muted-foreground">{item.count} 件</td>
+                        <td className="py-2.5 text-right font-bold text-primary">￥{item.totalCost.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1294,6 +2153,11 @@ function AdminView({ token }: { token: string | null }) {
         </div>
       )}
 
+      {/* AI Config Tab */}
+      {tab === 'ai' && (
+        <AdminAIConfigsTab token={token} />
+      )}
+
       {/* Skills Modal */}
       {skillsModalOpen && skillsTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
@@ -1328,6 +2192,217 @@ function AdminView({ token }: { token: string | null }) {
         </div>
       )}
 
+    </div>
+  );
+}
+
+function SubaoChatWidget({ token, role }: { token: string | null; role: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          role: 'assistant',
+          content: '你好呀！我是宿舍小助手 **「宿宝」** 🤖✨。有什么关于宿舍报修、起居生活或管理系统的问题，都可以随时问我哦！'
+        }
+      ]);
+    }
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      scrollToBottom();
+    }
+  }, [messages, isOpen]);
+
+  const handleSend = async (textToSend?: string) => {
+    const content = (textToSend || input).trim();
+    if (!content || loading) return;
+
+    if (!textToSend) setInput('');
+    setLoading(true);
+
+    const newMessages = [...messages, { role: 'user' as const, content }];
+    setMessages(newMessages);
+
+    try {
+      const res = await authFetch(API.AI.CHAT, token, {
+        method: 'POST',
+        body: JSON.stringify({ messages: newMessages })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: `❌ 宿宝暂时遇到了网络阻碍（${data.detail || '接口报错'}）。您可以稍后再试，或者联系管理员。` }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: '❌ 宿宝无法连接到后台服务器，请检查您的网络。' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClear = () => {
+    if (confirm('确定要清空与宿宝的历史对话吗？')) {
+      setMessages([
+        {
+          role: 'assistant',
+          content: '对话已重置。你好，我是「宿宝」，有什么我可以帮你的吗？'
+        }
+      ]);
+    }
+  };
+
+  const chips = role === 'admin'
+    ? ['如何导出报修记录？', '如何启用新AI模型？', '修改我的密码']
+    : role === 'technician'
+      ? ['用电安全指引', '水管漏水应急处理', '修改我的密码']
+      : ['宿舍停电怎么办？', '如何提交报修单？', '修改我的密码'];
+
+  const renderMessageContent = (text: string) => {
+    if (!text) return null;
+    let html = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/`(.*?)`/g, '<code class="bg-black/10 px-1 py-0.5 rounded text-xs font-mono">$1</code>');
+    html = html.replace(/^\s*-\s+(.*?)$/gm, '<li class="ml-4 list-disc mt-1">$1</li>');
+    html = html.replace(/^\s*(\d+)\.\s+(.*?)$/gm, '<li class="ml-4 list-decimal mt-1">$2</li>');
+    html = html.replace(/\n\n/g, '<div class="h-2"></div>');
+    html = html.replace(/\n/g, '<br />');
+    
+    return <div dangerouslySetInnerHTML={{ __html: html }} className="text-sm leading-relaxed whitespace-pre-wrap" />;
+  };
+
+  return (
+    <div className="fixed bottom-6 right-6 z-[60] select-none">
+      {!isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-all duration-300 relative group animate-bounce-subtle"
+        >
+          <Bot className="w-7 h-7" />
+          <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-blue-500"></span>
+          </span>
+          <div className="absolute right-16 bg-gray-900 text-white text-xs px-2.5 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap shadow-md">
+            问问宿宝 🤖
+          </div>
+        </button>
+      )}
+
+      {isOpen && (
+        <div className="w-[360px] sm:w-[380px] h-[500px] bg-white rounded-3xl border border-border/80 shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
+          <div className="px-5 py-4 bg-gradient-to-r from-primary to-blue-600 text-white flex justify-between items-center shadow-md">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+                <Bot className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm leading-tight">宿舍助理「宿宝」</h4>
+                <p className="text-[10px] text-white/70">在线智能服务中</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleClear}
+                className="p-1.5 hover:bg-white/10 rounded-lg transition"
+                title="清空对话"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 hover:bg-white/10 rounded-lg transition"
+                title="关闭"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
+            {messages.map((msg, index) => (
+              <div key={index} className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {msg.role !== 'user' && (
+                  <div className="w-8 h-8 bg-primary/10 border border-primary/20 text-primary rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                    <Bot className="w-4.5 h-4.5" />
+                  </div>
+                )}
+                <div
+                  className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm text-sm ${
+                    msg.role === 'user'
+                      ? 'bg-primary text-primary-foreground rounded-tr-none'
+                      : 'bg-white text-foreground border border-border/60 rounded-tl-none'
+                  }`}
+                >
+                  {renderMessageContent(msg.content)}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex gap-2.5 justify-start">
+                <div className="w-8 h-8 bg-primary/10 border border-primary/20 text-primary rounded-xl flex items-center justify-center shrink-0">
+                  <Bot className="w-4.5 h-4.5" />
+                </div>
+                <div className="bg-white border border-border/60 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm flex items-center justify-center">
+                  <div className="flex gap-1">
+                    <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="px-4 py-2 border-t border-border bg-white overflow-x-auto whitespace-nowrap flex gap-2 no-scrollbar scroll-smooth">
+            {chips.map((chip, idx) => (
+              <button
+                key={idx}
+                disabled={loading}
+                onClick={() => handleSend(chip)}
+                className="inline-block px-3 py-1 bg-muted hover:bg-primary hover:text-white text-xs font-medium rounded-full transition duration-200 border border-border/40 disabled:opacity-50 select-none active:scale-95"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-3 border-t border-border bg-white flex gap-2 items-center">
+            <input
+              type="text"
+              value={input}
+              disabled={loading}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="发送给宿宝的问题..."
+              className="flex-1 px-4 py-2 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 text-sm disabled:bg-muted/30"
+            />
+            <button
+              onClick={() => handleSend()}
+              disabled={loading || !input.trim()}
+              className="p-2.5 bg-primary disabled:bg-muted hover:opacity-90 disabled:text-muted-foreground text-primary-foreground rounded-xl transition flex items-center justify-center active:scale-95 duration-200 shadow-sm"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1462,6 +2537,7 @@ export default function Index() {
         initialProfile={displayProfile}
         onProfileUpdated={loadProfile}
       />
+      <SubaoChatWidget token={token} role={displayProfile.role} />
     </div>
   );
 }
