@@ -148,7 +148,7 @@ export interface PaginatedApiResponse<T> extends ApiResponse<T> {
 export interface AIConfig {
   id: string;
   name: string;
-  provider: 'simulation' | 'xiaomi' | 'openai' | 'deepseek' | 'ollama' | 'custom';
+  provider: 'simulation' | 'openai' | 'deepseek' | 'ollama' | 'custom';
   apiKey?: string;
   baseUrl?: string;
   model?: string;
