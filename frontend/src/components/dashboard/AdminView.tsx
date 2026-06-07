@@ -400,8 +400,8 @@ export default function AdminView({ token }: { token: string | null }) {
           {stats.trendData && stats.trendData.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
               <h4 className="font-semibold text-foreground mb-4">近期报修趋势</h4>
-              <div className="h-[240px] w-full flex-1">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full">
+                <ResponsiveContainer width="100%" height={240}>
                   <LineChart data={stats.trendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                     <XAxis dataKey="date" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
@@ -418,8 +418,8 @@ export default function AdminView({ token }: { token: string | null }) {
             {/* 柱状图：工单状态分布 */}
             <div className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col min-h-[300px]">
               <h4 className="font-semibold text-foreground mb-4">工单状态分布</h4>
-              <div className="h-[240px] w-full flex-1">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full">
+                <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={barData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                     <XAxis dataKey="name" stroke="#9ca3af" fontSize={11} tickLine={false} axisLine={false} />
@@ -441,7 +441,7 @@ export default function AdminView({ token }: { token: string | null }) {
               {pieData.length > 0 ? (
                 <div className="h-[240px] w-full flex-1 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="h-[180px] w-[180px] flex-shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height={180}>
                       <PieChart>
                         <Pie
                           data={pieData}
