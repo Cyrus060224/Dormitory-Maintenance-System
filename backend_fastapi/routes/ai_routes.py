@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from database import get_db
 from auth import verify_token, require_admin
 from models import AIConfigCreateRequest, AIConfigUpdateRequest, AIChatRequest
-from services.ai_service import mask_api_key, get_simulation_diagnosis
+from services.ai_service import mask_api_key, get_simulation_diagnosis, call_active_llm
 
 router = APIRouter()
 
@@ -77,7 +77,7 @@ async def update_ai_config(config_id: str, payload: AIConfigUpdateRequest, curre
         if payload.provider is not None:
             updates.append("provider = ?")
             values.append(payload.provider)
-        if payload.apiKey is not None:
+        if payload.apiKey is not None and "..." not in payload.apiKey:
             updates.append("apiKey = ?")
             values.append(payload.apiKey)
         if payload.baseUrl is not None:
@@ -217,43 +217,11 @@ async def chat_with_assistant(payload: AIChatRequest, current_user: dict = Depen
 
         return {"success": True, "data": {"reply": reply}}
 
-    try:
-        async with httpx.AsyncClient() as client:
-            if provider == "ollama":
-                url = f"{base_url}/api/chat" if base_url else "http://localhost:11434/api/chat"
-                res = await client.post(
-                    url,
-                    json={
-                        "model": model or "llama3",
-                        "messages": api_messages,
-                        "stream": False
-                    },
-                    timeout=30.0
-                )
-                if res.status_code == 200:
-                    reply = res.json()["message"]["content"]
-                    return {"success": True, "data": {"reply": reply}}
-                else:
-                    return {"success": False, "detail": f"Ollama 服务返回异常: {res.status_code}"}
-            else:
-                url = f"{base_url}/chat/completions"
-                headers = {
-                    "Content-Type": "application/json"
-                }
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                body = {
-                    "model": model,
-                    "messages": api_messages
-                }
-                res = await client.post(url, json=body, headers=headers, timeout=30.0)
-                if res.status_code == 200:
-                    reply = res.json()["choices"][0]["message"]["content"]
-                    return {"success": True, "data": {"reply": reply}}
-                else:
-                    return {"success": False, "detail": f"大模型接口调用失败 (代码 {res.status_code}): {res.text}"}
-    except Exception as e:
-        return {"success": False, "detail": f"AI 服务响应错误: {str(e)}"}
+    reply = await call_active_llm(api_messages, timeout=60.0)
+    if reply:
+        return {"success": True, "data": {"reply": reply}}
+    else:
+        return {"success": False, "detail": "AI 服务响应错误，请检查模型配置"}
 
 
 @router.post("/api/repairs/analyze-image")

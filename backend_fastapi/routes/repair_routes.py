@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from database import get_db, VALID_STATUSES, STATUS_LABELS
 from auth import verify_token, require_admin
 from models import CreateRepairRequest, UpdateRepairStatus, AnalyzeRepairRequest, EvaluateRequest
-from services.ai_service import _get_ai_analysis
+from services.ai_service import _get_ai_analysis, ai_dispatch
 
 router = APIRouter()
 
@@ -49,6 +49,23 @@ async def get_repairs(
         total_query = f"SELECT COUNT(*) FROM repairs r {where_clause}"
         total = conn.execute(total_query, params).fetchone()[0]
 
+        # 维修员/管理员按紧急程度排序（待处理优先 + SLA截止时间升序），学生按创建时间倒序
+        if role in ("technician", "admin"):
+            order_clause = """ORDER BY
+                CASE r.status
+                    WHEN 'pending' THEN 1
+                    WHEN 'approved' THEN 2
+                    WHEN 'in_progress' THEN 3
+                    WHEN 'pending_evaluation' THEN 4
+                    WHEN 'completed' THEN 5
+                    WHEN 'closed' THEN 6
+                    WHEN 'rejected' THEN 7
+                    ELSE 8
+                END,
+                r.slaDueDate ASC"""
+        else:
+            order_clause = "ORDER BY r.createdAt DESC"
+
         data_query = f"""
             SELECT r.*,
                    u.name as studentName,
@@ -57,7 +74,7 @@ async def get_repairs(
             LEFT JOIN users u ON r.studentId = u.id
             LEFT JOIN users t ON r.assignedTo = t.id
             {where_clause}
-            ORDER BY r.createdAt DESC
+            {order_clause}
         """
 
         if page is not None and pageSize is not None:
@@ -137,20 +154,52 @@ async def create_repair(payload: CreateRepairRequest, current_user: dict = Depen
         matching_techs = [t for t in techs if t['skills'] and payload.category in t['skills']]
 
         if matching_techs:
-            min_tasks = float('inf')
-            best_tech = None
+            # 收集每位候选维修员的综合数据
+            candidates = []
             for tech in matching_techs:
                 tech_id = tech['id']
-                tasks = conn.execute("SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status IN ('pending', 'approved', 'in_progress')", (tech_id,)).fetchone()[0]
-                if tasks < min_tasks:
-                    min_tasks = tasks
-                    best_tech = tech
+                active_tasks = conn.execute(
+                    "SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status IN ('pending', 'approved', 'in_progress')",
+                    (tech_id,)
+                ).fetchone()[0]
+                # 跳过已满载的维修员（>= 5 单）
+                if active_tasks >= 5:
+                    continue
+                avg_row = conn.execute(
+                    "SELECT AVG(r.rating) FROM reviews r JOIN repairs rep ON r.requestId = rep.id WHERE rep.assignedTo = ?",
+                    (tech_id,)
+                ).fetchone()
+                avg_rating = round(avg_row[0], 1) if avg_row[0] else 0
+                total_completed = conn.execute(
+                    "SELECT COUNT(*) FROM repairs WHERE assignedTo = ? AND status IN ('completed', 'closed')",
+                    (tech_id,)
+                ).fetchone()[0]
+                candidates.append({
+                    "id": tech_id,
+                    "name": tech['name'],
+                    "skills": tech['skills'],
+                    "activeTasks": active_tasks,
+                    "avgRating": avg_rating,
+                    "totalCompleted": total_completed,
+                })
 
-            if best_tech and min_tasks < 5:
-                assigned_to = best_tech['id']
-                status = "approved"
-                tech_name = best_tech['name']
-                admin_note = f"[🤖 AI智能派单] 根据技能匹配与空闲度（当前负载 {min_tasks} 单），自动分配给：{tech_name}"
+            if candidates:
+                # 尝试 LLM 智能派单
+                dispatch_result = await ai_dispatch(payload.description, payload.category, payload.priority, candidates)
+
+                if dispatch_result:
+                    # LLM 成功决策
+                    assigned_to = dispatch_result["techId"]
+                    status = "approved"
+                    tech_name = next((c["name"] for c in candidates if c["id"] == assigned_to), "未知")
+                    reason = dispatch_result["reason"]
+                    admin_note = f"[🤖 AI智能派单] {reason}，已分配给：{tech_name}"
+                else:
+                    # LLM 失败 → 降级到规则（最小负载）
+                    best = min(candidates, key=lambda c: c["activeTasks"])
+                    assigned_to = best["id"]
+                    status = "approved"
+                    admin_note = f"[⚙️ 规则派单] 技能匹配+负载均衡（当前 {best['activeTasks']} 单），自动分配给：{best['name']}"
 
         conn.execute(
             """INSERT INTO repairs
@@ -214,10 +263,15 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
                         part = conn.execute("SELECT * FROM parts WHERE id = ?", (item.partId,)).fetchone()
                         if not part:
                             raise HTTPException(status_code=400, detail="所选配件不存在")
-                        if part["stock"] < item.quantity:
+
+                        # 原子扣减：WHERE stock >= quantity 防止并发竞态
+                        result = conn.execute(
+                            "UPDATE parts SET stock = stock - ? WHERE id = ? AND stock >= ?",
+                            (item.quantity, item.partId, item.quantity)
+                        )
+                        if result.rowcount == 0:
                             raise HTTPException(status_code=400, detail=f"配件 {part['name']} 库存不足（当前库存 {part['stock']}）")
 
-                        conn.execute("UPDATE parts SET stock = stock - ? WHERE id = ?", (item.quantity, item.partId))
                         part_usage_id = str(uuid.uuid4())
                         conn.execute(
                             "INSERT INTO repair_parts (id, repairId, partId, quantity, price, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
@@ -230,15 +284,9 @@ async def update_repair_status(repair_id: str, payload: UpdateRepairStatus, curr
             if payload.status not in valid_statuses:
                 raise HTTPException(status_code=400, detail="无效的状态")
 
-            admin_transitions = {
-                'pending': {'approved', 'rejected'},
-                'approved': {'in_progress', 'pending'},
-                'in_progress': {'completed', 'pending'},
-                'completed': {'pending_evaluation', 'in_progress'},
-                'pending_evaluation': {'closed', 'in_progress'},
-                'closed': set(),
-                'rejected': set()
-            }
+            # 管理员可自由切换所有状态
+            all_statuses = {'pending', 'approved', 'in_progress', 'completed', 'pending_evaluation', 'closed', 'rejected'}
+            admin_transitions = {s: all_statuses - {s} for s in all_statuses}
             if payload.status != existing["status"] and payload.status not in admin_transitions.get(existing["status"], set()):
                 current_label = STATUS_LABELS.get(existing["status"], existing["status"])
                 target_label = STATUS_LABELS.get(payload.status, payload.status)

@@ -4,10 +4,11 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi.responses import JSONResponse
 
 from database import get_db, UPLOAD_DIR
 from auth import verify_token, require_admin, pwd_context
-from models import UpdateProfileRequest, ChangePasswordRequest, UpdateSkillsRequest
+from models import UpdateProfileRequest, ChangePasswordRequest, UpdateSkillsRequest, CreateAdminRequest, CreateTechnicianRequest
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ async def get_users(
     conn = get_db()
     try:
         total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        query = "SELECT id, name, email, role, studentId, dormRoom, phone, createdAt FROM users ORDER BY createdAt DESC"
+        query = "SELECT id, name, email, role, studentId, dormRoom, phone, skills, createdAt FROM users ORDER BY createdAt DESC"
         params = []
         if page is not None and pageSize is not None:
             query += " LIMIT ? OFFSET ?"
@@ -201,3 +202,63 @@ async def change_password(payload: ChangePasswordRequest, current_user: dict = D
 
     print(f"[/api/users/change-password] Password changed for user: {user_id}")
     return {"success": True, "message": "密码修改成功"}
+
+
+@router.post("/api/users/create-admin")
+async def create_admin(payload: CreateAdminRequest, current_user: dict = Depends(require_admin)):
+    if "@" not in payload.email:
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度不能少于6位")
+
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?", (payload.email,)).fetchone()
+        if existing:
+            raise HTTPException(status_code=400, detail="该邮箱已被注册")
+
+        user_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        hashed_password = pwd_context.hash(payload.password)
+        conn.execute(
+            "INSERT INTO users (id, name, email, password, role, phone, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, payload.name, payload.email, hashed_password, "admin", payload.phone, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"[/api/users/create-admin] Admin created: {payload.name} ({payload.email})")
+    return JSONResponse(
+        status_code=201,
+        content={"success": True, "message": "管理员创建成功", "data": {"id": user_id, "name": payload.name, "email": payload.email, "role": "admin"}},
+    )
+
+
+@router.post("/api/users/create-technician")
+async def create_technician(payload: CreateTechnicianRequest, current_user: dict = Depends(require_admin)):
+    if "@" not in payload.email:
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度不能少于6位")
+
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?", (payload.email,)).fetchone()
+        if existing:
+            raise HTTPException(status_code=400, detail="该邮箱已被注册")
+
+        user_id = str(uuid.uuid4())
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        hashed_password = pwd_context.hash(payload.password)
+        conn.execute(
+            "INSERT INTO users (id, name, email, password, role, skills, phone, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, payload.name, payload.email, hashed_password, "technician", payload.skills, payload.phone, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"[/api/users/create-technician] Technician created: {payload.name} ({payload.email})")
+    return JSONResponse(
+        status_code=201,
+        content={"success": True, "message": "维修员创建成功", "data": {"id": user_id, "name": payload.name, "email": payload.email, "role": "technician", "skills": payload.skills}},
+    )

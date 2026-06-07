@@ -13,10 +13,8 @@ router = APIRouter()
 
 @router.post("/api/register")
 async def register(payload: SignupRequest):
-    allowed_roles = {'student', 'technician'}
-    role = payload.role or 'student'
-    if role not in allowed_roles:
-        raise HTTPException(status_code=400, detail="不允许注册该角色")
+    # 只允许注册学生账号，维修员和管理员只能由管理员创建
+    role = 'student'
 
     if "@" not in payload.email:
         raise HTTPException(status_code=400, detail="邮箱格式不正确")

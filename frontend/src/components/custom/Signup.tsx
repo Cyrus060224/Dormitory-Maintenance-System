@@ -5,8 +5,6 @@ import { toast } from 'sonner';
 import { Eye, EyeOff, Wrench } from 'lucide-react';
 import { API } from '../../lib/api';
 
-type Role = 'student' | 'technician';
-
 export default function Signup() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -15,7 +13,6 @@ export default function Signup() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'student' as Role,
     studentId: '',
     dormRoom: '',
     phone: '',
@@ -59,7 +56,7 @@ export default function Signup() {
           email: form.email,
           password: form.password,
           confirmPassword: form.confirmPassword,
-          role: form.role,
+          role: 'student',
           studentId: form.studentId || undefined,
           dormRoom: form.dormRoom || undefined,
           phone: form.phone || undefined,
@@ -92,27 +89,6 @@ export default function Signup() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Role selection */}
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">账户类型</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['student', 'technician'] as Role[]).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => handleChange('role', r)}
-                    className={`py-2 px-3 rounded-xl text-sm font-medium border-2 transition ${
-                      form.role === r
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-background text-foreground hover:border-primary/50'
-                    }`}
-                  >
-                    {r === 'student' ? '学生' : '维修人员'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">姓名 <span className="text-red-500">*</span></label>
@@ -136,30 +112,28 @@ export default function Signup() {
               </div>
             </div>
 
-            {form.role === 'student' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">学号</label>
-                  <input
-                    type="text"
-                    value={form.studentId}
-                    onChange={(e) => handleChange('studentId', e.target.value)}
-                    placeholder="请输入学号"
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">宿舍号</label>
-                  <input
-                    type="text"
-                    value={form.dormRoom}
-                    onChange={(e) => handleChange('dormRoom', e.target.value)}
-                    placeholder="如：A校3-201"
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
-                  />
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">学号</label>
+                <input
+                  type="text"
+                  value={form.studentId}
+                  onChange={(e) => handleChange('studentId', e.target.value)}
+                  placeholder="请输入学号"
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+                />
               </div>
-            )}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">宿舍号</label>
+                <input
+                  type="text"
+                  value={form.dormRoom}
+                  onChange={(e) => handleChange('dormRoom', e.target.value)}
+                  placeholder="如：A校3-201"
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+                />
+              </div>
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">邮箱 <span className="text-red-500">*</span></label>

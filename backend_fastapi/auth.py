@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -10,7 +11,14 @@ from fastapi import HTTPException, Depends, Header
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 # ─── JWT Settings ─────────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("JWT_SECRET", "dorm-repair-system-secret-key-change-in-production")
+_env_key = os.getenv("JWT_SECRET")
+if _env_key:
+    SECRET_KEY = _env_key
+else:
+    # 未设置环境变量时自动生成随机密钥（每次重启后旧 token 全部失效）
+    SECRET_KEY = secrets.token_hex(32)
+    print("[auth] ⚠️  未设置 JWT_SECRET 环境变量，已自动生成随机密钥。重启后旧 token 将失效。")
+
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "1440"))
 

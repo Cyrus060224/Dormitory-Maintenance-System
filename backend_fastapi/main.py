@@ -22,6 +22,9 @@ from routes import (
 
 app = FastAPI(title="Dorm Repair API")
 
+# 保持对后台任务的引用，防止被 GC 回收
+_sla_task: asyncio.Task | None = None
+
 # Ensure uploads directory exists
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -68,8 +71,18 @@ for mod in [
     app.include_router(mod.router)
 
 
+def _sla_task_done_callback(task: asyncio.Task):
+    """后台 SLA 任务异常回调——防止异常被静默吞没"""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        print(f"[SLA] 后台任务异常退出: {exc}")
+
+
 @app.on_event("startup")
 def on_startup():
+    global _sla_task
     db_existed = os.path.exists(DB_PATH)
     init_db()
     if not db_existed:
@@ -77,5 +90,6 @@ def on_startup():
     else:
         print(f"数据库已就绪：{DB_PATH}")
 
-    # 启动后台异步任务
-    asyncio.create_task(check_sla_compliance_loop())
+    # 启动后台异步任务，绑定引用 + 异常回调
+    _sla_task = asyncio.create_task(check_sla_compliance_loop())
+    _sla_task.add_done_callback(_sla_task_done_callback)

@@ -40,6 +40,8 @@ export const API = {
     UPDATE_PROFILE: `${API_BASE_URL}/api/users/profile`,
     CHANGE_PASSWORD: `${API_BASE_URL}/api/users/change-password`,
     UPDATE_SKILLS: (id: string) => `${API_BASE_URL}/api/users/${id}/skills`,
+    CREATE_ADMIN: `${API_BASE_URL}/api/users/create-admin`,
+    CREATE_TECHNICIAN: `${API_BASE_URL}/api/users/create-technician`,
   },
   STATS: {
     GET: `${API_BASE_URL}/api/stats`,

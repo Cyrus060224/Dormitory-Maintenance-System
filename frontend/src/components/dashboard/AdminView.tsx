@@ -42,6 +42,16 @@ export default function AdminView({ token }: { token: string | null }) {
   const [skillsForm, setSkillsForm] = useState<string[]>([]);
   const [skillsSaving, setSkillsSaving] = useState(false);
 
+  // Create Admin Modal State
+  const [createAdminOpen, setCreateAdminOpen] = useState(false);
+  const [createAdminForm, setCreateAdminForm] = useState({ name: '', email: '', password: '', phone: '' });
+  const [creatingAdmin, setCreatingAdmin] = useState(false);
+
+  // Create Technician Modal State
+  const [createTechOpen, setCreateTechOpen] = useState(false);
+  const [createTechForm, setCreateTechForm] = useState({ name: '', email: '', password: '', phone: '', skills: '' });
+  const [creatingTech, setCreatingTech] = useState(false);
+
   // Repairs Pagination State
   const [repairsPage, setRepairsPage] = useState(1);
   const [totalRepairs, setTotalRepairs] = useState(0);
@@ -161,6 +171,60 @@ export default function AdminView({ token }: { token: string | null }) {
     }
   }
 
+  async function createAdmin() {
+    if (!createAdminForm.name || !createAdminForm.email || !createAdminForm.password) {
+      toast.error('请填写完整信息');
+      return;
+    }
+    setCreatingAdmin(true);
+    try {
+      const res = await authFetch(API.USERS.CREATE_ADMIN, token, {
+        method: 'POST',
+        body: JSON.stringify(createAdminForm),
+      });
+      const data = await res.json() as ApiResponse<any>;
+      if (data.success) {
+        toast.success('管理员创建成功');
+        setCreateAdminOpen(false);
+        setCreateAdminForm({ name: '', email: '', password: '', phone: '' });
+        loadUsers();
+      } else {
+        toast.error(data.message || await readApiMessage(res, '创建失败'));
+      }
+    } catch {
+      toast.error('网络错误');
+    } finally {
+      setCreatingAdmin(false);
+    }
+  }
+
+  async function createTechnician() {
+    if (!createTechForm.name || !createTechForm.email || !createTechForm.password) {
+      toast.error('请填写完整信息');
+      return;
+    }
+    setCreatingTech(true);
+    try {
+      const res = await authFetch(API.USERS.CREATE_TECHNICIAN, token, {
+        method: 'POST',
+        body: JSON.stringify(createTechForm),
+      });
+      const data = await res.json() as ApiResponse<any>;
+      if (data.success) {
+        toast.success('维修员创建成功');
+        setCreateTechOpen(false);
+        setCreateTechForm({ name: '', email: '', password: '', phone: '', skills: '' });
+        loadUsers();
+      } else {
+        toast.error(data.message || await readApiMessage(res, '创建失败'));
+      }
+    } catch {
+      toast.error('网络错误');
+    } finally {
+      setCreatingTech(false);
+    }
+  }
+
   async function exportCSV() {
     try {
       const res = await authFetch(API.REPAIRS.EXPORT, token);
@@ -235,7 +299,7 @@ export default function AdminView({ token }: { token: string | null }) {
           </div>
           {/* Filter */}
           <div className="flex gap-2 flex-wrap mb-4">
-            {['all', 'pending', 'approved', 'in_progress', 'completed', 'pending_evaluation', 'closed', 'rejected'].map((s) => (
+            {['all', 'pending', 'approved', 'in_progress', 'completed', 'closed', 'rejected'].map((s) => (
               <button key={s} onClick={() => { setFilterStatus(s); setRepairsPage(1); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   filterStatus === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -552,9 +616,19 @@ export default function AdminView({ token }: { token: string | null }) {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-foreground">用户列表 ({totalUsers})</h3>
-            <button onClick={loadUsers} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
-              <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => setCreateTechOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5">
+                <Wrench className="w-4 h-4" />{language === 'zh' ? '创建维修员' : 'Add Tech'}
+              </button>
+              <button onClick={() => setCreateAdminOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5">
+                <Shield className="w-4 h-4" />{language === 'zh' ? '创建管理员' : 'Add Admin'}
+              </button>
+              <button onClick={loadUsers} className="p-2 rounded-xl border border-border hover:bg-muted transition hover:scale-105 active:scale-95 duration-200" title="刷新列表">
+                <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
           <div className="space-y-3">
             {users.map((u) => (
@@ -570,9 +644,15 @@ export default function AdminView({ token }: { token: string | null }) {
                       {u.studentId && <p className="text-xs text-muted-foreground">学号：{u.studentId}</p>}
                       {u.dormRoom && <p className="text-xs text-muted-foreground">宿舍：{u.dormRoom}</p>}
                       {u.role === 'technician' && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          技能：{u.skills ? u.skills.split(',').map(s => CATEGORY_LABEL[s] || s).join(', ') : '未配置'}
-                        </p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {u.skills ? u.skills.split(',').map(s => (
+                            <span key={s} className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-600 border border-blue-200">
+                              {CATEGORY_LABEL[s] || s}
+                            </span>
+                          )) : (
+                            <span className="text-xs text-muted-foreground italic">未配置技能</span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -621,7 +701,7 @@ export default function AdminView({ token }: { token: string | null }) {
             <div className="p-4 space-y-3">
               {['water', 'electricity', 'furniture', 'network', 'other'].map(cat => (
                 <label key={cat} className="flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer hover:bg-muted/50 transition">
-                  <input type="checkbox" className="w-4 h-4 rounded text-primary focus:ring-primary/50" 
+                  <input type="checkbox" className="w-4 h-4 rounded text-primary focus:ring-primary/50"
                     checked={skillsForm.includes(cat)}
                     onChange={(e) => {
                       if (e.target.checked) setSkillsForm(prev => [...prev, cat]);
@@ -636,6 +716,122 @@ export default function AdminView({ token }: { token: string | null }) {
               <button onClick={() => setSkillsModalOpen(false)} className="flex-1 py-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition">取消</button>
               <button onClick={saveSkills} disabled={skillsSaving} className="flex-1 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50">
                 {skillsSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Admin Modal */}
+      {createAdminOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="font-semibold text-foreground">{language === 'zh' ? '创建管理员账号' : 'Create Admin Account'}</h3>
+              <button onClick={() => setCreateAdminOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '姓名' : 'Name'}</label>
+                <input value={createAdminForm.name} onChange={(e) => setCreateAdminForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入姓名' : 'Enter name'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '邮箱' : 'Email'}</label>
+                <input type="email" value={createAdminForm.email} onChange={(e) => setCreateAdminForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入邮箱' : 'Enter email'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '密码' : 'Password'}</label>
+                <input type="password" value={createAdminForm.password} onChange={(e) => setCreateAdminForm(p => ({ ...p, password: e.target.value }))}
+                  placeholder={language === 'zh' ? '至少6位' : 'Min 6 characters'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '手机号' : 'Phone'}</label>
+                <input type="tel" value={createAdminForm.phone} onChange={(e) => setCreateAdminForm(p => ({ ...p, phone: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入手机号' : 'Enter phone number'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+            </div>
+            <div className="p-4 border-t border-border flex gap-3">
+              <button onClick={() => setCreateAdminOpen(false)} className="flex-1 py-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition">
+                {t('cancel')}
+              </button>
+              <button onClick={createAdmin} disabled={creatingAdmin}
+                className="flex-1 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50">
+                {creatingAdmin ? (language === 'zh' ? '创建中...' : 'Creating...') : (language === 'zh' ? '创建' : 'Create')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Technician Modal */}
+      {createTechOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="font-semibold text-foreground">{language === 'zh' ? '创建维修员账号' : 'Create Technician Account'}</h3>
+              <button onClick={() => setCreateTechOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '姓名' : 'Name'}</label>
+                <input value={createTechForm.name} onChange={(e) => setCreateTechForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入姓名' : 'Enter name'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '邮箱' : 'Email'}</label>
+                <input type="email" value={createTechForm.email} onChange={(e) => setCreateTechForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入邮箱' : 'Enter email'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '密码' : 'Password'}</label>
+                <input type="password" value={createTechForm.password} onChange={(e) => setCreateTechForm(p => ({ ...p, password: e.target.value }))}
+                  placeholder={language === 'zh' ? '至少6位' : 'Min 6 characters'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '手机号' : 'Phone'}</label>
+                <input type="tel" value={createTechForm.phone} onChange={(e) => setCreateTechForm(p => ({ ...p, phone: e.target.value }))}
+                  placeholder={language === 'zh' ? '请输入手机号' : 'Enter phone number'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">{language === 'zh' ? '技能' : 'Skills'}</label>
+                <div className="flex flex-wrap gap-2">
+                  {['water', 'electricity', 'furniture', 'network', 'other'].map(cat => (
+                    <label key={cat} className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border cursor-pointer hover:bg-muted/50 transition text-xs">
+                      <input type="checkbox" className="w-3 h-3 rounded text-primary focus:ring-primary/50"
+                        checked={createTechForm.skills.split(',').filter(Boolean).includes(cat)}
+                        onChange={(e) => {
+                          const current = createTechForm.skills.split(',').filter(Boolean);
+                          const updated = e.target.checked ? [...current, cat] : current.filter(s => s !== cat);
+                          setCreateTechForm(p => ({ ...p, skills: updated.join(',') }));
+                        }}
+                      />
+                      <span>{CATEGORY_LABEL[cat] || cat}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-4 border-t border-border flex gap-3">
+              <button onClick={() => setCreateTechOpen(false)} className="flex-1 py-2 rounded-xl border border-border text-sm font-semibold hover:bg-muted transition">
+                {t('cancel')}
+              </button>
+              <button onClick={createTechnician} disabled={creatingTech}
+                className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 transition disabled:opacity-50">
+                {creatingTech ? (language === 'zh' ? '创建中...' : 'Creating...') : (language === 'zh' ? '创建' : 'Create')}
               </button>
             </div>
           </div>

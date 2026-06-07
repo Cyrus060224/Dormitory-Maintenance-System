@@ -82,6 +82,19 @@ class CreateAnnouncementRequest(BaseModel):
 class UpdateSkillsRequest(BaseModel):
     skills: str
 
+class CreateAdminRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    phone: str = ""
+
+class CreateTechnicianRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    skills: str = ""
+    phone: str = ""
+
 
 class AIConfigCreateRequest(BaseModel):
     name: str

@@ -119,7 +119,7 @@ export default function TechnicianView({ token }: { token: string | null }) {
           {/* Stats Summary */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             {[
-              { label: t('status_pending'), count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
+              { label: language === 'zh' ? '已审批' : 'Approved', count: pending.length, color: 'bg-yellow-50 text-yellow-700', icon: Clock },
               { label: t('status_in_progress'), count: inProgress.length, color: 'bg-purple-50 text-purple-700', icon: Wrench },
               { label: t('status_completed'), count: completed.length, color: 'bg-green-50 text-green-700', icon: CheckCircle },
             ].map(({ label, count, color, icon: Icon }) => (
